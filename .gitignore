@@ -6,3 +6,5 @@ local.properties
 .idea/
 *.iml
 app/snapshots/
+keystore.properties
+*.jks
