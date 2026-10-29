@@ -47,6 +47,7 @@ import org.paw.app.model.movedTo
 import org.paw.app.model.parseEffectCatalog
 import org.paw.app.model.trimmedLeft
 import org.paw.app.model.trimmedRight
+import org.paw.app.model.importTake
 import org.paw.app.model.withFades
 
 /** Transport poll interval; also the reconciliation loop's cadence. */
@@ -157,8 +158,14 @@ class SongController(
         applySnapshot(next)
     }
 
-    private fun applySnapshot(s: Song) {
+    private fun applySnapshot(snapshot: Song) {
         val prev = song
+        // Click, count-in and boost are settings, not edits: undo leaves them.
+        val s = snapshot.copy(
+            clickEnabled = prev.clickEnabled,
+            countInBars = prev.countInBars,
+            micBoostDb = prev.micBoostDb,
+        )
         // Tracks present in the engine but absent in the snapshot must go.
         for (t in prev.tracks) if (s.track(t.id) == null) Engine.removeTrack(gen, t.id)
         song = s
@@ -202,42 +209,49 @@ class SongController(
         outputDevice = key
     }
 
+    // ---- per-song settings ----
+    // Click, count-in and the phone mic boost live in the song, so every song
+    // keeps its own.
+
     /** Mic boost in dB; the phone mic is far too quiet without it. */
-    var micBoostDb: Float by PrefState(prefs.micBoostDb) { prefs.micBoostDb = it }
-        private set
+    val micBoostDb: Float get() = song.micBoostDb
 
-    // ---- metronome (click on/off and count-in are app prefs; tempo is song data) ----
+    val clickEnabled: Boolean get() = song.clickEnabled
 
-    var clickEnabled: Boolean by PrefState(prefs.clickEnabled) { prefs.clickEnabled = it }
-        private set
+    val countInBars: Int get() = song.countInBars
 
-    var countInBars: Int by PrefState(prefs.countInBars) { prefs.countInBars = it }
-        private set
+    private fun saveSettings(s: Song) {
+        song = s
+        saveFlow.value = s
+    }
 
     fun setClick(enabled: Boolean) {
-        clickEnabled = enabled
+        saveSettings(song.copy(clickEnabled = enabled))
         syncMetronome()
     }
 
     fun setCountIn(bars: Int) {
-        countInBars = bars.coerceIn(0, 4)
+        saveSettings(song.copy(countInBars = bars.coerceIn(0, 4)))
     }
+
+    // ---- app-wide display settings ----
+    // Read through here so the views have one source.
 
     /** Meter peak-hold: null = off, Duration.INFINITE = until the transport
      *  starts. */
-    var meterHold: Duration? by PrefState(prefs.meterHold) { prefs.meterHold = it }
+    val meterHold: Duration? get() = prefs.meterHold
 
     /** Playhead follow style: false = jump at the view edge, true = scroll
      *  continuously under a mid-view playhead. */
-    var followSmooth: Boolean by PrefState(prefs.followSmooth) { prefs.followSmooth = it }
+    val followSmooth: Boolean get() = prefs.followSmooth
 
     fun setTempo(bpm: Float, beatsPerBar: Int = song.beatsPerBar) {
-        val s = song.copy(
-            tempoBpm = bpm.coerceIn(30f, 300f),
-            beatsPerBar = beatsPerBar.coerceIn(1, 12),
+        saveSettings(
+            song.copy(
+                tempoBpm = bpm.coerceIn(30f, 300f),
+                beatsPerBar = beatsPerBar.coerceIn(1, 12),
+            ),
         )
-        song = s
-        saveFlow.value = s
         syncMetronome()
     }
 
@@ -271,7 +285,7 @@ class SongController(
     }
 
     fun setMicBoost(db: Float) {
-        micBoostDb = db
+        saveSettings(song.copy(micBoostDb = db))
         if (currentInput == InputDevice.Mic) Engine.setInputGain(10f.pow(db / 20f))
     }
 
@@ -665,7 +679,9 @@ class SongController(
     fun addTrack() {
         pushUndo()
         val id = song.nextTrackId
-        val track = Track(id = id, name = "Track $id", inputMode = INPUT_CH1)
+        // On the input that is there right now, like a new song's tracks.
+        val input = inputOptions.firstOrNull()?.device ?: InputDevice.Mic
+        val track = Track(id = id, name = "Track $id", inputDevice = input, inputMode = INPUT_CH1)
         commit(song.copy(tracks = song.tracks + track, nextTrackId = id + 1), track)
     }
 
@@ -931,6 +947,46 @@ class SongController(
             val peaks = PeakData(data, 256, info[0])
             peakMutex.withLock { peakCache[takeRel] = peaks }
             peaks
+        }
+    }
+
+    // ---- import ----
+
+    var importing: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * Copies audio files the user picked (a recorder's card, Downloads, a
+     * cloud drive) into the song as recordings. They land on the Recordings
+     * screen, ready to place; nothing goes on the timeline by itself. Runs
+     * on the controller's scope, so leaving the screen doesn't stop it.
+     */
+    fun importRecordings(uris: List<android.net.Uri>) {
+        val scope = scope ?: return
+        if (importing || uris.isEmpty()) return
+        importing = true
+        scope.launch {
+            try {
+                var done = 0
+                var lastError: String? = null
+                withContext(Dispatchers.IO) {
+                    for (uri in uris) {
+                        try {
+                            importTake(context, uri, audioDir)
+                            done++
+                        } catch (e: Exception) {
+                            lastError = e.message ?: "Import failed"
+                        }
+                    }
+                }
+                message = when {
+                    lastError == null -> if (done == 1) "Imported 1 recording" else "Imported $done recordings"
+                    done == 0 -> lastError
+                    else -> "Imported $done of ${uris.size}. $lastError"
+                }
+            } finally {
+                importing = false
+            }
         }
     }
 

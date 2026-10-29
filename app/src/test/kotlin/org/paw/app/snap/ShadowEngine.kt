@@ -299,7 +299,7 @@ private fun builtinCatalogJson(): String {
     return JSONArray(
         listOf(
             plugin(
-                "paw_eq3", "PAW! 3-Band EQ",
+                "paw_eq3", "PAW 3-Band EQ",
                 listOf(
                     port("Low (dB)", 0f, -24f, 24f),
                     port("Mid (dB)", 0f, -24f, 24f),
@@ -308,7 +308,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_comp", "PAW! Compressor",
+                "paw_comp", "PAW Compressor",
                 listOf(
                     port("Threshold (dB)", -15f, -60f, 0f),
                     port("Ratio (:1)", 4f, 1f, 16f, log = true),
@@ -318,7 +318,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_delay", "PAW! Delay",
+                "paw_delay", "PAW Delay",
                 listOf(
                     port("Time (ms)", 200f, 20f, 2000f, log = true),
                     port("Feedback (%)", 23.75f, 0f, 95f),
@@ -326,7 +326,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_reverb", "PAW! Reverb",
+                "paw_reverb", "PAW Reverb",
                 listOf(
                     port("Size (%)", 50f, 0f, 100f),
                     port("Damping (%)", 50f, 0f, 100f),
@@ -335,7 +335,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_chorus", "PAW! Chorus",
+                "paw_chorus", "PAW Chorus",
                 listOf(
                     port("Rate (Hz)", 0.7f, 0.05f, 10f, log = true),
                     port("Depth (%)", 50f, 0f, 100f),
@@ -343,7 +343,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_gate", "PAW! Noise Gate",
+                "paw_gate", "PAW Noise Gate",
                 listOf(
                     port("Threshold (dB)", -60f, -80f, 0f),
                     port("Attack (ms)", 0.6f, 0.1f, 100f, log = true),
@@ -352,7 +352,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_limiter", "PAW! Limiter",
+                "paw_limiter", "PAW Limiter",
                 listOf(
                     port("Threshold (dB)", 0f, -24f, 0f),
                     port("Ceiling (dB)", 0f, -24f, 0f),
@@ -360,7 +360,7 @@ private fun builtinCatalogJson(): String {
                 ),
             ),
             plugin(
-                "paw_filter", "PAW! Filter",
+                "paw_filter", "PAW Filter",
                 listOf(
                     port("Mode (0=LP 1=HP)", 0f, 0f, 1f, int = true),
                     port("Cutoff (Hz)", 20000f, 20f, 20000f, log = true),

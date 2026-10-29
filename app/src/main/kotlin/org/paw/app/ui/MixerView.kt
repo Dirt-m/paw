@@ -102,7 +102,12 @@ fun MixerView(
 }
 
 @Composable
-private fun StripName(name: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+private fun StripName(
+    name: String,
+    color: androidx.compose.ui.graphics.Color,
+    showFx: Boolean = true,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -118,7 +123,7 @@ private fun StripName(name: String, color: androidx.compose.ui.graphics.Color, o
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text("›", style = TitleStyle.copy(color = Colors.dim, fontSize = 18.sp))
+        if (showFx) FxChip(onClick)
     }
 }
 
@@ -150,32 +155,48 @@ private fun FaderBlock(
     }
 }
 
+/**
+ * Arm, monitor, mute and solo. Beside the fader (landscape) they make one
+ * column, every button the full width; under it (portrait) they pair up.
+ */
 @Composable
-private fun ArmMuteSolo(track: Track, controller: SongController, stacked: Boolean) {
+private fun TrackButtons(
+    track: Track,
+    controller: SongController,
+    column: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    // Stacked buttons stretch to share the column, so they may be shorter
+    // than a free-standing one.
+    val size = if (column) 26.dp else 36.dp
     val arm: @Composable (Modifier) -> Unit = { m ->
-        Toggle("●", track.armed, Colors.red, fontSize = 14.sp, size = 36.dp, modifier = m, onClick = {
+        Toggle("●", track.armed, Colors.red, fontSize = 14.sp, size = size, modifier = m, onClick = {
             controller.updateTrack(track.id) { it.copy(armed = !it.armed) }
         })
     }
+    val monitor: @Composable (Modifier) -> Unit = { m -> MonitorToggle(track, controller, size, m) }
     val mute: @Composable (Modifier) -> Unit = { m ->
-        Toggle("M", track.mute, Colors.amber, size = 36.dp, modifier = m, onClick = {
+        Toggle("M", track.mute, Colors.amber, size = size, modifier = m, onClick = {
             controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
         })
     }
     val solo: @Composable (Modifier) -> Unit = { m ->
-        Toggle("S", track.solo, Colors.green, size = 36.dp, modifier = m, onClick = {
+        Toggle("S", track.solo, Colors.green, size = size, modifier = m, onClick = {
             controller.updateTrack(track.id) { it.copy(solo = !it.solo) }
         })
     }
-    if (stacked) {
-        arm(Modifier.fillMaxWidth())
-        Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            mute(Modifier.weight(1f))
-            solo(Modifier.weight(1f))
+    if (column) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            arm(Modifier.fillMaxWidth().weight(1f))
+            monitor(Modifier.fillMaxWidth().weight(1f))
+            mute(Modifier.fillMaxWidth().weight(1f))
+            solo(Modifier.fillMaxWidth().weight(1f))
         }
     } else {
-        arm(Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            arm(Modifier.weight(1f))
+            monitor(Modifier.weight(1f))
+        }
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             mute(Modifier.weight(1f))
@@ -238,23 +259,24 @@ private fun ChannelStrip(
             )
         }
         if (short) {
+            // Landscape is short: the four buttons share the height beside
+            // the fader, and pan takes the full width underneath.
             Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FaderBlock(controller, track.id, track.gain, Modifier.fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     badge()
                     Spacer(Modifier.height(4.dp))
-                    ArmMuteSolo(track, controller, stacked = false)
-                    Spacer(Modifier.weight(1f))
-                    PanRow(track, controller)
+                    TrackButtons(track, controller, column = true, modifier = Modifier.weight(1f))
                 }
             }
+            PanRow(track, controller)
         } else {
             badge()
             Spacer(Modifier.height(4.dp))
             FaderBlock(controller, track.id, track.gain, Modifier.weight(1f))
             PanRow(track, controller)
             Spacer(Modifier.height(4.dp))
-            ArmMuteSolo(track, controller, stacked = true)
+            TrackButtons(track, controller, column = false)
         }
     }
 }
@@ -274,7 +296,9 @@ private fun MasterStrip(
     }
     Box(Modifier.padding(STRIP_GAP)) {
         StripFrame(width - STRIP_GAP * 2, Colors.amber.copy(alpha = 0.5f)) {
-            StripName("Master", Colors.amber) { onOpenTrack(MASTER_TRACK_ID) }
+            // The portrait master strip is too narrow for its name and FX
+            // both; the name row opens the same screen.
+            StripName("Master", Colors.amber, showFx = short) { onOpenTrack(MASTER_TRACK_ID) }
             if (short) {
                 Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FaderBlock(controller, MASTER_TRACK_ID, master.gain, Modifier.fillMaxHeight())
@@ -284,6 +308,8 @@ private fun MasterStrip(
                         mute()
                     }
                 }
+                // The track strips' pan row, so the faders line up.
+                Spacer(Modifier.height(36.dp))
             } else {
                 Text(" ", style = LabelStyle.copy(fontSize = 10.sp))
                 Spacer(Modifier.height(4.dp))

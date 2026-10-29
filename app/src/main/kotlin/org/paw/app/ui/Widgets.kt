@@ -42,6 +42,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -99,7 +102,8 @@ fun AppButton(
 
 /**
  * A state button: lit when [on] (tinted fill, colored border and label),
- * quiet otherwise. Arm, mute, solo, click, loop, monitor, bypass.
+ * quiet otherwise. Arm, mute, solo, click, loop, monitor, bypass. An [icon]
+ * replaces the label where a glyph reads better than a letter.
  */
 @Composable
 fun Toggle(
@@ -110,7 +114,9 @@ fun Toggle(
     modifier: Modifier = Modifier,
     size: Dp = Dimens.touch,
     fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    icon: (DrawScope.(Color) -> Unit)? = null,
 ) {
+    val tint = if (on) color else Colors.dim
     Box(
         modifier
             .defaultMinSize(minWidth = size, minHeight = size)
@@ -121,17 +127,44 @@ fun Toggle(
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label,
-            style = ButtonStyle.copy(
-                color = if (on) color else Colors.dim,
-                fontSize = fontSize,
-                fontWeight = FontWeight.Bold,
-            ),
-            maxLines = 1,
-            softWrap = false,
-        )
+        if (icon != null) {
+            Canvas(Modifier.size(16.dp)) { icon(tint) }
+        } else {
+            Text(
+                label,
+                style = ButtonStyle.copy(
+                    color = tint,
+                    fontSize = fontSize,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
     }
+}
+
+/** Headphones, for the monitor toggle: a headband over two ear cups. */
+val HeadphonesGlyph: DrawScope.(Color) -> Unit = { color ->
+    val w = size.width
+    val h = size.height
+    val stroke = w * 0.12f
+    drawArc(
+        color, startAngle = 180f, sweepAngle = 180f, useCenter = false,
+        topLeft = Offset(w * 0.1f, h * 0.08f), size = Size(w * 0.8f, h * 0.84f),
+        style = Stroke(stroke, cap = StrokeCap.Round),
+    )
+    val cupW = w * 0.24f
+    val cupH = h * 0.4f
+    val top = h * 0.52f
+    drawRoundRect(
+        color, topLeft = Offset(w * 0.04f, top), size = Size(cupW, cupH),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(cupW * 0.35f),
+    )
+    drawRoundRect(
+        color, topLeft = Offset(w * 0.96f - cupW, top), size = Size(cupW, cupH),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(cupW * 0.35f),
+    )
 }
 
 /** One-of-N choice drawn as connected segments; the chosen one is lit. */
@@ -618,8 +651,8 @@ fun MeterBar(
 }
 
 /**
- * Phone-mic boost, on both the track and the settings screen. The drag pushes
- * only the engine gain; the preference write happens once, on release.
+ * Phone-mic boost, on the track screen under the mic input. The drag pushes
+ * only the engine gain; the song saves once, on release.
  */
 @Composable
 fun MicBoostSlider(controller: SongController, modifier: Modifier = Modifier) {

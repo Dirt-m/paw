@@ -1,4 +1,4 @@
-# PAW!
+# PAW
 
 A pocket audio workstation: a multitrack recorder for Android that works with class-compliant USB audio
 interfaces. Plug in an interface, arm a track, press record. Non-destructive editing,

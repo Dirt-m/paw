@@ -97,7 +97,7 @@ fun TrackDetailScreen(
 
             val levelAndIo: @Composable () -> Unit = {
                 Stack(gap = 20.dp) {
-                    LevelSection(controller, trackId, track.gain, track.pan, track.monitor, isMaster)
+                    LevelSection(controller, trackId, track.gain, track.pan, isMaster)
                     if (isMaster) OutputSection(controller) else InputSection(controller, trackId)
                 }
             }
@@ -164,7 +164,6 @@ private fun LevelSection(
     trackId: Int,
     gain: Float,
     pan: Float,
-    monitor: Boolean,
     isMaster: Boolean,
 ) {
     var liveGain by remember { mutableStateOf<Float?>(null) }
@@ -183,17 +182,6 @@ private fun LevelSection(
                     PanSlider(controller, trackId, pan, Modifier.weight(1f), onLive = { livePan = it })
                     HSpace(10.dp)
                     Text(formatPan(livePan ?: pan), style = MonoStyle, modifier = Modifier.width(64.dp))
-                }
-                SettingRow("Monitor", labelWidth = 72.dp) {
-                    Spacer(Modifier.weight(1f))
-                    Segmented(
-                        listOf("Off", "On"),
-                        selected = if (monitor) 1 else 0,
-                        onSelect = { i ->
-                            controller.updateTrack(trackId) { it.copy(monitor = i == 1) }
-                        },
-                        modifier = Modifier.width(140.dp),
-                    )
                 }
             }
         }
@@ -357,7 +345,7 @@ private fun PickRow(plugin: PluginInfo, onPick: (PluginInfo) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            plugin.name.removePrefix("PAW! ").removePrefix("paw! "),
+            plugin.name.removePrefix("PAW ").removePrefix("paw "),
             style = BodyStyle,
             modifier = Modifier.weight(1f),
             maxLines = 1,
@@ -385,7 +373,7 @@ private fun EffectCard(controller: SongController, trackId: Int, index: Int) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                plugin?.name?.removePrefix("PAW! ") ?: (effect.pluginId.substringAfterLast(':') + " (missing)"),
+                plugin?.name?.removePrefix("PAW ") ?: (effect.pluginId.substringAfterLast(':') + " (missing)"),
                 style = NameStyle.copy(color = if (plugin == null || bypassed) Colors.dim else Colors.text),
                 modifier = Modifier.weight(1f),
                 maxLines = 1,

@@ -2,12 +2,17 @@ package org.paw.app
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
  * The app's one preferences file, and the only place that knows its keys.
- * Everything here outlives the open song; song data lives in the manifest.
+ * Everything here applies to every song; anything that belongs to one song
+ * lives in its manifest. The settings screen edits the observable values
+ * below, and each one is on disk the moment it changes.
  */
 enum class KeepAwakeMode { Off, FiveMinutes, On }
 
@@ -18,18 +23,11 @@ class AppPrefs private constructor(private val prefs: SharedPreferences) {
         get() = prefs.getString(KEY_OUTPUT_DEVICE, "") ?: ""
         set(value) = prefs.edit().putString(KEY_OUTPUT_DEVICE, value).apply()
 
-    /** Mic boost in dB; the phone mic is far too quiet without it. */
-    var micBoostDb: Float
-        get() = prefs.getFloat(KEY_MIC_BOOST_DB, 16f)
-        set(value) = prefs.edit().putFloat(KEY_MIC_BOOST_DB, value).apply()
-
-    var clickEnabled: Boolean
-        get() = prefs.getBoolean(KEY_CLICK_ENABLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_CLICK_ENABLED, value).apply()
-
-    var countInBars: Int
-        get() = prefs.getInt(KEY_COUNT_IN_BARS, 0)
-        set(value) = prefs.edit().putInt(KEY_COUNT_IN_BARS, value).apply()
+    // Songs saved before click, count-in and mic boost moved into the song
+    // carry none of the three; they open with what these keys last held.
+    val legacyMicBoostDb: Float get() = prefs.getFloat(KEY_MIC_BOOST_DB, 16f)
+    val legacyClickEnabled: Boolean get() = prefs.getBoolean(KEY_CLICK_ENABLED, false)
+    val legacyCountInBars: Int get() = prefs.getInt(KEY_COUNT_IN_BARS, 0)
 
     /**
      * Keep-awake: [KeepAwakeMode.On] holds the screen for good,
@@ -37,33 +35,43 @@ class AppPrefs private constructor(private val prefs: SharedPreferences) {
      * touch (a busy transport always holds it, so a take can't die to the
      * lock screen), [KeepAwakeMode.Off] leaves the system timeout alone.
      */
-    var keepAwakeMode: KeepAwakeMode
-        get() = when (prefs.getString(KEY_KEEP_AWAKE_MODE, null)) {
-            "on" -> KeepAwakeMode.On
-            "5min" -> KeepAwakeMode.FiveMinutes
-            "off" -> KeepAwakeMode.Off
-            // Installs that stored the older boolean: only an explicit false
-            // survives as off, everything else gets the five-minute default.
-            else -> if (prefs.getBoolean(KEY_KEEP_AWAKE, true)) {
-                KeepAwakeMode.FiveMinutes
-            } else {
-                KeepAwakeMode.Off
-            }
-        }
-        set(value) = prefs.edit().putString(
+    var keepAwakeMode: KeepAwakeMode by mutableStateOf(readKeepAwake())
+        private set
+
+    fun updateKeepAwakeMode(mode: KeepAwakeMode) {
+        keepAwakeMode = mode
+        prefs.edit().putString(
             KEY_KEEP_AWAKE_MODE,
-            when (value) {
+            when (mode) {
                 KeepAwakeMode.On -> "on"
                 KeepAwakeMode.FiveMinutes -> "5min"
                 KeepAwakeMode.Off -> "off"
             },
         ).apply()
+    }
+
+    private fun readKeepAwake(): KeepAwakeMode = when (prefs.getString(KEY_KEEP_AWAKE_MODE, null)) {
+        "on" -> KeepAwakeMode.On
+        "5min" -> KeepAwakeMode.FiveMinutes
+        "off" -> KeepAwakeMode.Off
+        // Installs that stored the older boolean: only an explicit false
+        // survives as off, everything else gets the five-minute default.
+        else -> if (prefs.getBoolean(KEY_KEEP_AWAKE, true)) {
+            KeepAwakeMode.FiveMinutes
+        } else {
+            KeepAwakeMode.Off
+        }
+    }
 
     /** Playhead follow style: false = jump when the playhead nears the edge,
      *  true = scroll continuously under a mid-view playhead. */
-    var followSmooth: Boolean
-        get() = prefs.getBoolean(KEY_FOLLOW_SMOOTH, false)
-        set(value) = prefs.edit().putBoolean(KEY_FOLLOW_SMOOTH, value).apply()
+    var followSmooth: Boolean by mutableStateOf(prefs.getBoolean(KEY_FOLLOW_SMOOTH, false))
+        private set
+
+    fun updateFollowSmooth(smooth: Boolean) {
+        followSmooth = smooth
+        prefs.edit().putBoolean(KEY_FOLLOW_SMOOTH, smooth).apply()
+    }
 
     /** Timeline zoom (frames per pixel), remembered per song. */
     fun zoomFor(songKey: String): Float? =
@@ -105,20 +113,26 @@ class AppPrefs private constructor(private val prefs: SharedPreferences) {
      * transport starts. On disk it stays the seconds-with-negative-one
      * encoding existing installs hold, and nothing above this line sees that.
      */
-    var meterHold: Duration?
-        get() = when (val secs = prefs.getInt(KEY_METER_HOLD_SECS, 2)) {
+    var meterHold: Duration? by mutableStateOf(
+        when (val secs = prefs.getInt(KEY_METER_HOLD_SECS, 2)) {
             0 -> null
             -1 -> Duration.INFINITE
             else -> secs.seconds
-        }
-        set(value) = prefs.edit().putInt(
+        },
+    )
+        private set
+
+    fun updateMeterHold(hold: Duration?) {
+        meterHold = hold
+        prefs.edit().putInt(
             KEY_METER_HOLD_SECS,
             when {
-                value == null -> 0
-                value == Duration.INFINITE -> -1
-                else -> value.inWholeSeconds.toInt()
+                hold == null -> 0
+                hold == Duration.INFINITE -> -1
+                else -> hold.inWholeSeconds.toInt()
             },
         ).apply()
+    }
 
     companion object {
         private const val FILE = "paw"

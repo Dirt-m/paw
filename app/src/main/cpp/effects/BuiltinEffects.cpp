@@ -1,7 +1,7 @@
-// PAW! built-in effects: 3-band EQ, compressor, stereo delay, reverb,
+// PAW built-in effects: 3-band EQ, compressor, stereo delay, reverb,
 // chorus, noise gate, peak limiter, resonant filter.
 //
-// Copyright (C) 2026 PAW! contributors
+// Copyright (C) 2026 PAW contributors
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -1107,7 +1107,7 @@ LADSPA_Descriptor describe(unsigned long id, const char* label, const char* name
     d.Label = label;
     d.Properties = LADSPA_PROPERTY_HARD_RT_CAPABLE;
     d.Name = name;
-    d.Maker = "PAW!";
+    d.Maker = "PAW";
     d.Copyright = "GPL-3.0-or-later";
     d.PortCount = T::kPortCount;
     d.PortDescriptors = ports;
@@ -1127,28 +1127,28 @@ const LADSPA_Descriptor* pawBuiltinDescriptor(unsigned long index) {
     // IDs are local to the built-in set; nothing dlopens these, so they need
     // no registration with the LADSPA ID authority.
     static const LADSPA_Descriptor kEq3 = describe<Eq3>(
-            0xD0B01, "paw_eq3", "PAW! 3-Band EQ",
+            0xD0B01, "paw_eq3", "PAW 3-Band EQ",
             kEq3Ports, kEq3PortNames, kEq3Hints);
     static const LADSPA_Descriptor kComp = describe<Comp>(
-            0xD0B02, "paw_comp", "PAW! Compressor",
+            0xD0B02, "paw_comp", "PAW Compressor",
             kCompPorts, kCompPortNames, kCompHints);
     static const LADSPA_Descriptor kDelay = describe<Delay>(
-            0xD0B03, "paw_delay", "PAW! Delay",
+            0xD0B03, "paw_delay", "PAW Delay",
             kDelayPorts, kDelayPortNames, kDelayHints);
     static const LADSPA_Descriptor kReverb = describe<Reverb>(
-            0xD0B04, "paw_reverb", "PAW! Reverb",
+            0xD0B04, "paw_reverb", "PAW Reverb",
             kReverbPorts, kReverbPortNames, kReverbHints);
     static const LADSPA_Descriptor kChorus = describe<Chorus>(
-            0xD0B05, "paw_chorus", "PAW! Chorus",
+            0xD0B05, "paw_chorus", "PAW Chorus",
             kChorusPorts, kChorusPortNames, kChorusHints);
     static const LADSPA_Descriptor kGate = describe<Gate>(
-            0xD0B06, "paw_gate", "PAW! Noise Gate",
+            0xD0B06, "paw_gate", "PAW Noise Gate",
             kGatePorts, kGatePortNames, kGateHints);
     static const LADSPA_Descriptor kLimiter = describe<Limiter>(
-            0xD0B07, "paw_limiter", "PAW! Limiter",
+            0xD0B07, "paw_limiter", "PAW Limiter",
             kLimiterPorts, kLimiterPortNames, kLimiterHints);
     static const LADSPA_Descriptor kFilter = describe<Filter>(
-            0xD0B08, "paw_filter", "PAW! Filter",
+            0xD0B08, "paw_filter", "PAW Filter",
             kFilterPorts, kFilterPortNames, kFilterHints);
 
     switch (index) {

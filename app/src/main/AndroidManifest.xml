@@ -6,7 +6,7 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
-        android:label="PAW!"
+        android:label="PAW"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <!-- Both orientations are supported; layouts adapt via BoxWithConstraints.

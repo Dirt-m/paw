@@ -25,9 +25,12 @@ import androidx.core.content.FileProvider
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.paw.app.model.InputDevice
 import org.paw.app.model.InputOption
 import org.paw.app.model.ProjectStore
+import org.paw.app.ui.MetronomeScreen
 import org.paw.app.ui.OptionsScreen
 import org.paw.app.ui.ProjectListScreen
 import org.paw.app.ui.SongScreen
@@ -39,7 +42,10 @@ private sealed interface Nav {
     data object Song : Nav
     data class TrackDetail(val trackId: Int) : Nav
     data object Takes : Nav
-    data object Options : Nav
+    data object Metronome : Nav
+
+    /** Settings, opened from the song list or from inside a song. */
+    data class Options(val fromSong: Boolean) : Nav
 }
 
 private const val KEEP_AWAKE_WINDOW_MS = 5 * 60_000L
@@ -65,18 +71,35 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = ProjectStore(applicationContext)
+        val prefs = AppPrefs.of(this)
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 var nav by remember { mutableStateOf<Nav>(Nav.Projects) }
                 var controller by remember { mutableStateOf<SongController?>(null) }
-                var entries by remember { mutableStateOf(store.list()) }
+                // Empty until songs from older installs have moved out of the
+                // private folder: one opened mid-copy would be removed under
+                // its own controller.
+                var entries by remember { mutableStateOf(emptyList<ProjectStore.Entry>()) }
+                var songsReady by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    val failed = withContext(Dispatchers.IO) { store.migrate() }
+                    entries = store.list()
+                    songsReady = true
+                    if (failed > 0) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "$failed song(s) could not be moved to Documents/PAW",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
 
                 // A recorder must not die to the lock screen mid-take, so a
                 // busy transport always holds the screen. Past that, On holds
                 // it for good and FiveMinutes until five minutes after the
                 // last touch, so a forgotten phone stops draining.
-                var keepAwakeMode by remember { mutableStateOf(AppPrefs.of(this).keepAwakeMode) }
+                val keepAwakeMode = prefs.keepAwakeMode
                 val keepFlag = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 LaunchedEffect(keepAwakeMode) {
                     when (keepAwakeMode) {
@@ -209,9 +232,14 @@ class MainActivity : ComponentActivity() {
                 when (val here = nav) {
                     Nav.Projects -> ProjectListScreen(
                         entries = entries,
+                        loading = !songsReady,
                         onOpen = { openSong(it.dir) },
                         onCreate = { name ->
-                            if (!store.exists(name)) store.create(name)
+                            // The first input that is actually there: an
+                            // interface if one is plugged in, else the mic.
+                            val input = usbInputs.firstOrNull()
+                                ?.let { InputDevice.Usb(it.name) } ?: InputDevice.Mic
+                            if (!store.exists(name)) store.create(name, input)
                             entries = store.list()
                             openSong(store.dirFor(name))
                         },
@@ -222,6 +250,7 @@ class MainActivity : ComponentActivity() {
                             store.delete(entry.dir, keepTakes)
                             entries = store.list()
                         },
+                        onOpenSettings = { nav = Nav.Options(fromSong = false) },
                     )
 
                     Nav.Song -> {
@@ -247,7 +276,8 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onOpenTrack = { nav = Nav.TrackDetail(it) },
                                 onOpenTakes = { nav = Nav.Takes },
-                                onOpenOptions = { nav = Nav.Options },
+                                onOpenOptions = { nav = Nav.Options(fromSong = true) },
+                                onOpenMetronome = { nav = Nav.Metronome },
                             )
                         }
                     }
@@ -272,36 +302,40 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    Nav.Options -> {
+                    Nav.Metronome -> {
                         val c = controller
                         if (c == null) {
                             nav = Nav.Projects
                         } else {
                             BackHandler { nav = Nav.Song }
-                            // A JNI call that takes the engine's control lock:
-                            // read it once per route, not once per recomposition.
-                            val latencyFrames = remember(c.activeOutputRoute) {
+                            MetronomeScreen(c, onBack = { nav = Nav.Song })
+                        }
+                    }
+
+                    is Nav.Options -> {
+                        val c = controller.takeIf { here.fromSong }
+                        val back = { nav = if (c != null) Nav.Song else Nav.Projects }
+                        BackHandler { back() }
+                        // A JNI call that takes the engine's control lock:
+                        // read it once per route, not once per recomposition.
+                        val latencyFrames = remember(c?.activeOutputRoute) {
+                            c?.let {
                                 Latency.frames(
                                     this@MainActivity,
-                                    c.activeOutputRoute,
+                                    it.activeOutputRoute,
                                     Engine.routeLatencyFrames(),
                                 )
-                            }
-                            OptionsScreen(
-                                controller = c,
-                                keepAwakeMode = keepAwakeMode,
-                                onKeepAwakeMode = { mode ->
-                                    keepAwakeMode = mode
-                                    AppPrefs.of(this).keepAwakeMode = mode
-                                },
-                                latencyMs = latencyFrames * 1000f /
-                                    org.paw.app.model.SAMPLE_RATE,
-                                effectsPath = File(
-                                    getExternalFilesDir(null), "effects",
-                                ).absolutePath,
-                                onBack = { nav = Nav.Song },
-                            )
+                            } ?: 0L
                         }
+                        OptionsScreen(
+                            prefs = prefs,
+                            songsPath = "Internal storage / Documents / PAW",
+                            effectsPath = File(getExternalFilesDir(null), "effects").absolutePath,
+                            onBack = back,
+                            backLabel = if (c != null) "Song" else "Songs",
+                            controller = c,
+                            latencyMs = latencyFrames * 1000f / org.paw.app.model.SAMPLE_RATE,
+                        )
                     }
                 }
             }
@@ -333,7 +367,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Let the hardware go when we leave the foreground. An exclusive stream
      * held open on an explicit device id pins the platform's routing there for
-     * everything else on the phone, so a backgrounded PAW! would force
+     * everything else on the phone, so a backgrounded PAW would force
      * every other app onto whatever it last opened.
      *
      * Rotation does not come through here (configChanges keeps the activity

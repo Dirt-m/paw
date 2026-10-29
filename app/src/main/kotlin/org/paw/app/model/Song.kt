@@ -97,6 +97,9 @@ data class Song(
     val loopStart: Long = 0,        // frames; loop plays [loopStart, loopEnd)
     val loopEnd: Long = 0,
     val loopEnabled: Boolean = false,
+    val clickEnabled: Boolean = false,
+    val countInBars: Int = 0,       // bars of click before a take from stop
+    val micBoostDb: Float = 16f,    // phone mic only; interfaces stay at unity
 ) {
     val endFrame: Long
         get() = tracks.maxOfOrNull { t -> t.clips.maxOfOrNull { it.end } ?: 0L } ?: 0L
@@ -155,6 +158,9 @@ fun Song.toJson(): JSONObject = JSONObject().apply {
     put("loopStart", loopStart)
     put("loopEnd", loopEnd)
     put("loopEnabled", loopEnabled)
+    put("clickEnabled", clickEnabled)
+    put("countInBars", countInBars)
+    put("micBoostDb", micBoostDb.toDouble())
     // Older manifests may carry a "trash" array. It is ignored on load, which
     // orphans those clip references but no audio.
 }
@@ -205,7 +211,8 @@ private fun trackFromJson(o: JSONObject): Track {
     )
 }
 
-fun songFromJson(o: JSONObject): Song {
+/** [legacy] supplies what a manifest from before a field existed lacks. */
+fun songFromJson(o: JSONObject, legacy: Song = Song(name = "")): Song {
     val tracks = o.getJSONArray("tracks")
     return Song(
         name = o.getString("name"),
@@ -219,5 +226,8 @@ fun songFromJson(o: JSONObject): Song {
         loopStart = o.optLong("loopStart", 0),
         loopEnd = o.optLong("loopEnd", 0),
         loopEnabled = o.optBoolean("loopEnabled", false),
+        clickEnabled = o.optBoolean("clickEnabled", legacy.clickEnabled),
+        countInBars = o.optInt("countInBars", legacy.countInBars),
+        micBoostDb = o.optDouble("micBoostDb", legacy.micBoostDb.toDouble()).toFloat(),
     )
 }
