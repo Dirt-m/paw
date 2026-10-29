@@ -1,6 +1,6 @@
 # Scope
 
-What PAW! does before it can be called finished. Everything here is in. Everything
+What PAW does before it can be called finished. Everything here is in. Everything
 not here is out until this ships.
 
 ## The idea
@@ -37,8 +37,10 @@ effects, the fader and the master.
 Input is device-aware. A track's input is one channel, or the stereo pair, of any
 connected interface, or the phone's own microphone. The phone mic and speaker are
 usable while an interface is connected and used automatically when none is. The phone
-mic gets an adjustable software boost (default +16 dB, up to +32) because it is
-otherwise inaudible. Interface takes stay bit-perfect.
+mic gets an adjustable software boost (default +16 dB, up to +32, stored per song)
+because it is otherwise inaudible. A new song or track starts on an input that is
+actually connected (the first interface, else the phone mic), and keeps that choice
+when it is later opened with something else plugged in. Interface takes stay bit-perfect.
 
 Output is chosen on the master screen: automatic, or any connected playback endpoint
 (interfaces, wired and Bluetooth headphones, the phone speaker).
@@ -53,8 +55,8 @@ any slider resets it to its default.
 ## Song
 
 Both orientations. Track lanes with waveforms that stay readable on quiet takes.
-Transport: play, stop, record, return to start, seek. A metronome with tempo and beats
-per bar stored in the song, and a loop region that plays back without a gap at the
+Transport: play, stop, record, return to start, seek. A metronome with click, count-in, tempo and
+beats per bar stored in the song, and a loop region that plays back without a gap at the
 wrap (recording stays linear). Timeline zoom is remembered per song. The screen stays
 awake while recording and for five minutes after the last touch, adjustable.
 
@@ -65,7 +67,10 @@ it.
 
 Every take in a song is browsable, grouped per track, newest first, with its length.
 Each can be auditioned, placed on a track at the playhead, or deleted from disk behind
-a confirmation.
+a confirmation. Audio files from elsewhere (a field recorder's card, Downloads) can
+be imported into the song: WAV at any common rate and depth, and compressed formats
+the platform can decode. A 48 kHz WAV is copied sample for sample; anything else is
+resampled to 48 kHz.
 
 ## Effects
 
@@ -97,8 +102,9 @@ control, and gestures are shortcuts, never the only way. `docs/ui.md` has the la
 ## Settled technical decisions
 
 48 kHz, 16-bit, which is what the M-Track Duo delivers over Android's USB path; takes
-are written exactly as the stream delivers them. A project is one folder per song: a
-`project.json` manifest beside an `audio/` directory of takes. Minimum Android version
+are written exactly as the stream delivers them. A project is one folder per song in
+`Documents/PAW` on the phone's shared storage: a `project.json` manifest beside an
+`audio/` directory of takes. Minimum Android version
 is 12 (API 31). License is GPL-3.0.
 
 ## Out of scope for now

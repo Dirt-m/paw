@@ -45,6 +45,8 @@ fun ProjectListScreen(
     onCreate: (String) -> Unit,
     onRename: (ProjectStore.Entry, String) -> Boolean,
     onDelete: (ProjectStore.Entry, Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
+    loading: Boolean = false,
     initialNaming: Boolean = false,
 ) {
     var naming by remember { mutableStateOf(initialNaming) }
@@ -60,13 +62,15 @@ fun ProjectListScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "PAW!",
+                    "PAW",
                     style = TitleStyle.copy(color = Colors.amber, fontSize = 26.sp),
                     modifier = Modifier.weight(1f),
                 )
                 if (!naming) {
+                    AppButton("Settings", accent = Colors.dim, height = 44.dp, onClick = onOpenSettings)
+                    HSpace(8.dp)
                     AppButton("+  New song", accent = Colors.amber, filled = true, height = 44.dp,
-                        onClick = { naming = true })
+                        enabled = !loading, onClick = { naming = true })
                 }
             }
             VSpace(16.dp)
@@ -89,7 +93,9 @@ fun ProjectListScreen(
                 VSpace(16.dp)
             }
 
-            if (entries.isEmpty() && !naming) {
+            if (loading) {
+                Text("Moving songs to Documents/PAW…", style = DimStyle)
+            } else if (entries.isEmpty() && !naming) {
                 Text("No songs yet.", style = DimStyle)
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -74,7 +75,7 @@ import org.paw.app.model.Track
 // action has a control, and gestures are shortcuts.
 
 private val HEADER_W = 168.dp
-private val HEADER_W_COMPACT = 124.dp
+private val HEADER_W_COMPACT = 148.dp
 private val LANE_H_MAX = 128.dp
 
 enum class SongView { Tracks, Mix }
@@ -86,6 +87,7 @@ fun SongScreen(
     onOpenTrack: (Int) -> Unit,
     onOpenTakes: () -> Unit,
     onOpenOptions: () -> Unit,
+    onOpenMetronome: () -> Unit,
     initialView: SongView = SongView.Tracks,
 ) {
     val context = LocalContext.current
@@ -151,7 +153,7 @@ fun SongScreen(
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             SongTopBar(
                 controller, view, onView = { view = it }, onBack, onOpenTrack,
-                onOpenTakes, onOpenOptions, compact = compact,
+                onOpenTakes, onOpenOptions, onOpenMetronome, compact = compact,
             )
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -180,6 +182,7 @@ private fun SongTopBar(
     onOpenTrack: (Int) -> Unit,
     onOpenTakes: () -> Unit,
     onOpenOptions: () -> Unit,
+    onOpenMetronome: () -> Unit,
     compact: Boolean,
 ) {
     val song = controller.song
@@ -210,6 +213,10 @@ private fun SongTopBar(
                 DropdownMenuItem(
                     text = { Text("Recordings", style = BodyStyle) },
                     onClick = { menuOpen = false; onOpenTakes() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Metronome", style = BodyStyle) },
+                    onClick = { menuOpen = false; onOpenMetronome() },
                 )
                 DropdownMenuItem(
                     text = {
@@ -327,10 +334,15 @@ private fun TracksView(
                 }
             }
 
+            val headerPx = with(LocalDensity.current) { headerW.toPx() }
+            val trackCount = song.tracks.size
             Column(
                 Modifier
                     .fillMaxSize()
                     .onSizeChanged { viewportPx = it.height }
+                    .emptyAreaGestures(tl, controller, headerPx) {
+                        trackCount * laneHPx - laneScroll.value
+                    }
                     .verticalScroll(laneScroll),
             ) {
                 song.tracks.forEachIndexed { index, track ->
@@ -370,8 +382,9 @@ private fun TracksView(
 }
 
 /**
- * The lane's left panel: name, arm / mute / solo, and the level meter. The whole
- * header is the button that opens the track's own screen; the chevron says so.
+ * The lane's left panel: name, FX, then arm / monitor / mute / solo, and the
+ * level meter. FX opens the track's own screen (input, level, effects); the
+ * rest of the header opens it too, so a near miss still lands there.
  */
 @Composable
 private fun TrackHeader(
@@ -409,20 +422,46 @@ private fun TrackHeader(
                     modifier = Modifier.padding(start = 4.dp),
                 )
             }
-            Text("›", style = TitleStyle.copy(color = Colors.dim, fontSize = 18.sp), modifier = Modifier.padding(start = 4.dp))
+            HSpace(4.dp)
+            FxChip { onOpenTrack(track.id) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Toggle("●", track.armed, Colors.red, size = btn, fontSize = 14.sp, onClick = {
+            Toggle("●", track.armed, Colors.red, size = btn, fontSize = 14.sp, modifier = Modifier.weight(1f), onClick = {
                 controller.updateTrack(track.id) { it.copy(armed = !it.armed) }
             })
-            Toggle("M", track.mute, Colors.amber, size = btn, onClick = {
+            MonitorToggle(track, controller, btn, Modifier.weight(1f))
+            Toggle("M", track.mute, Colors.amber, size = btn, modifier = Modifier.weight(1f), onClick = {
                 controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
             })
-            Toggle("S", track.solo, Colors.green, size = btn, onClick = {
+            Toggle("S", track.solo, Colors.green, size = btn, modifier = Modifier.weight(1f), onClick = {
                 controller.updateTrack(track.id) { it.copy(solo = !it.solo) }
             })
         }
         LiveMeter(controller, track.id, Modifier.fillMaxWidth(), thickness = 6.dp)
+    }
+}
+
+/** Software input monitoring: the armed input through the chain to the mix. */
+@Composable
+internal fun MonitorToggle(track: Track, controller: SongController, size: Dp, modifier: Modifier = Modifier) {
+    Toggle("", track.monitor, Colors.green, size = size, modifier = modifier, icon = HeadphonesGlyph, onClick = {
+        controller.updateTrack(track.id) { it.copy(monitor = !it.monitor) }
+    })
+}
+
+/** The way into a track's own screen, labelled for what most visits are for. */
+@Composable
+internal fun FxChip(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(Dimens.corner)
+    Box(
+        Modifier
+            .clip(shape)
+            .border(1.dp, Colors.amber.copy(alpha = 0.55f), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("FX", style = LabelStyle.copy(color = Colors.amber, fontSize = 11.sp, letterSpacing = 1.sp), maxLines = 1)
     }
 }
 
@@ -497,7 +536,7 @@ private fun BoxScope.PlayheadChip(controller: SongController, tl: TimelineState,
 }
 
 @Composable
-private fun MessageBanner(controller: SongController, modifier: Modifier) {
+internal fun MessageBanner(controller: SongController, modifier: Modifier) {
     val msg = controller.message ?: return
     Box(
         modifier

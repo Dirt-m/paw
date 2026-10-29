@@ -165,7 +165,7 @@ fun demoController(context: Context, configureShadow: () -> Unit = {}): SongCont
 fun emptyController(context: Context): SongController {
     ShadowEngine.reset()
     val store = ProjectStore(context)
-    if (!store.exists("New Song")) store.create("New Song")
+    if (!store.exists("New Song")) store.create("New Song", InputDevice.Usb("M-Track Duo"))
     val song = store.load(store.dirFor("New Song"))!!
     return startController(context, "New Song", song) {}
 }

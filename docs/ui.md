@@ -9,21 +9,21 @@ moving a control.
 Every action has a visible control. Gestures are shortcuts, never the only way.
 
 The rest follows from the phone. The reference device is a Pixel 9a, 411 dp wide in
-portrait. That width holds about three finger-sized controls beside a track name, so
-anything beyond arm, mute, solo and a meter moves off the timeline row and onto a
-screen of its own.
+portrait. That width holds four small controls beside a track name, so anything beyond arm,
+monitor, mute, solo and a meter moves off the timeline row and onto a screen of
+its own.
 
 ## Screens
 
-**Songs.** The list. One primary action, New song. Each row opens on tap; rename and
-delete sit behind the row's own menu, and delete asks whether the recordings go with
-the song or stay on disk.
+**Songs.** The list. One primary action, New song, with Settings beside it. Each row
+opens on tap; rename and delete sit behind the row's own menu, and delete asks
+whether the recordings go with the song or stay on disk.
 
 **Song.** Three bands, top to bottom:
 
 - Top bar: back to Songs, the song name, what the engine is listening to (a green DUO
   or MIC, red LOST when the interface goes away), undo, redo, and a menu with
-  Recordings, Export mixdown and Settings. Under it, on a phone, the Tracks / Mix tabs.
+  Recordings, Metronome, Export mixdown and Settings. Under it, on a phone, the Tracks / Mix tabs.
 - The workspace, either the timeline or the mixer.
 - The transport, at the bottom where the thumb rests: the clock, Click and Loop above,
   then return-to-start, Play/Stop and Rec as the biggest buttons on the screen. A thin
@@ -34,9 +34,10 @@ When a clip is selected, a row of clip actions (Split, Duplicate, move up or dow
 track, Delete) appears between the workspace and the transport. It exists only while
 something is selected, so it can never be mistaken for a permanent control.
 
-**Tracks (timeline).** Each lane has a header with the track name, arm, mute, solo and
-a level meter. The whole header is a button, and the chevron after the name says so;
-it opens the track's screen. Armed tracks show their input source next to the name
+**Tracks (timeline).** Each lane has a header with the track name, an FX button, arm,
+monitor (headphones), mute, solo and a level meter. FX opens the track's screen, and
+so does the rest of the header, so a near miss still lands there. Monitor sits on the
+row rather than on the track screen because it gets switched while playing. Armed tracks show their input source next to the name
 (DUO 1, MIC), which is the moment that information matters. Volume is not in the
 header: at phone width a header fader is 90 dp long and imprecise, and it crowds
 everything else. Add track is a labelled row under the last lane.
@@ -52,19 +53,22 @@ selected clip draws what it offers: an amber grip pill straddles each edge on th
 lower half (trim), a green ring sits at the top end of each fade ramp (drag it
 sideways), and the silent wedge under a fade is shaded. When the playhead leaves the
 view, a small arrow chip appears on the lane edge nearest to it; tapping it brings the
-view back and re-engages follow. There is no permanent Follow toggle.
+view back and re-engages follow. There is no permanent Follow toggle. The empty
+workspace under the last lane and beside Add track pans and zooms like a lane, since
+in portrait it is the biggest and safest place to swipe.
 
 **Mix.** One channel strip per track, master pinned on the right. The strips exist
 because a phone is tall: a vertical fader gets 500 dp of travel in portrait, which
 makes fine level work possible in a way a header fader never could. Each strip has the
-name (a button, same chevron), a long fader beside a meter, the dB readout, pan, arm,
-mute and solo. The master strip has the fader, meter and mute. Strip width is computed
+name and FX (both open the track screen), a long fader beside a meter, the dB
+readout, pan, arm, monitor, mute and solo. The master strip has the fader, meter and mute. Strip width is computed
 so a whole number of strips fills the space beside the master (three on the 9a in
 portrait); the next strip starts exactly at the master's edge, never half visible. In
-landscape the buttons sit beside the fader instead of under it, so the fader keeps its
-height.
+landscape the four buttons stack in one column beside the fader and pan runs the
+full width underneath, so the fader keeps its height. In portrait the narrow master
+strip drops its FX button; the name opens the same screen.
 
-**Track.** Opened from either view. Level (volume, pan, monitor), then Input as a
+**Track.** Opened from either view. Level (volume, pan), then Input as a
 single radio list (each connected interface's Input 1, Input 2 and Inputs 1+2, then
 Phone microphone with its boost slider, then No input), then Effects. Effect cards show
 the plugin's controls, an On/Off toggle, reorder arrows when there is more than one,
@@ -75,14 +79,21 @@ Rename is a button in the top bar. Wide windows put level and input beside the c
 **Master.** The same screen with Output (Automatic, showing what it resolves to, then
 every connected playback endpoint) where Input would be, and no pan.
 
-**Recordings.** Every recording in the song, grouped by track, newest first. A row is a
-length, a date, and whether it is on the timeline; file names stay on disk. Play
+**Recordings.** Every recording in the song, grouped by track, newest first, with
+imported files in their own group. A row is a length, a date, and whether it is on
+the timeline; file names stay on disk. Import in the top bar opens Android's file
+picker, where a recorder plugged in as USB storage shows up as a drive. Play
 auditions, Add puts it on a track at the playhead, and ✕ (only on unused recordings)
 deletes from disk after a confirmation.
 
-**Settings.** Segmented controls, one per row: keep awake, follow style, click, tempo
-(stepper plus slider), beats per bar, count-in, peak hold, mic boost. Then a read-only
-Audio block (input, output, latency compensation) and the effects folder path.
+**Settings.** Only what applies to every song, reachable from the song list and from a
+song's menu. Segmented controls, one per row: keep awake, follow style, peak hold.
+With a song open, a read-only Audio block (input, output, latency compensation). Then
+the songs folder and the effects folder.
+
+**Metronome.** Per song, from the song menu: click, count-in, tempo (stepper plus
+slider) and beats per bar. The phone mic boost is per song too, under Phone
+microphone on the track screen.
 
 ## Conventions
 

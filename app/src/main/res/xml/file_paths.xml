@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- Mixdown WAVs under Android/data/org.paw.app/files, for the share sheet. -->
+    <!-- Mixdown WAVs in each song's folder under Documents/PAW, for the share sheet. -->
+    <external-path name="songs" path="Documents/PAW" />
+    <!-- Songs not yet moved out of Android/data/org.paw.app/files. -->
     <external-files-path name="files" path="." />
 </paths>

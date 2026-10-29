@@ -31,7 +31,10 @@ import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.paw.app.SongController
 import org.paw.app.TakeEntry
@@ -43,6 +46,9 @@ import org.paw.app.TakeEntry
 
 /** One per-track group of recordings, in song track order. */
 private data class RecGroup(val title: String, val entries: List<TakeEntry>)
+
+/** Files brought in from elsewhere, "import_<original name>.wav". */
+private const val IMPORT_PREFIX = "import_"
 
 /** trackId parsed from the standard take file name, "…_t<id>.wav". */
 private val TRACK_SUFFIX = Regex("_t(\\d+)\\.wav$")
@@ -60,7 +66,8 @@ private fun createdAt(entry: TakeEntry): Long {
 }
 
 private fun grouped(controller: SongController, list: List<TakeEntry>): List<RecGroup> {
-    val byTrack = list.groupBy { TRACK_SUFFIX.find(it.name)?.groupValues?.get(1)?.toIntOrNull() }
+    val (imported, recorded) = list.partition { it.name.startsWith(IMPORT_PREFIX) }
+    val byTrack = recorded.groupBy { TRACK_SUFFIX.find(it.name)?.groupValues?.get(1)?.toIntOrNull() }
     val groups = ArrayList<RecGroup>()
     val claimed = HashSet<Int>()
     for (track in controller.song.tracks) {
@@ -73,6 +80,7 @@ private fun grouped(controller: SongController, list: List<TakeEntry>): List<Rec
         if (id == null || id in claimed) continue
         groups += RecGroup("Track $id (removed)", entries)
     }
+    if (imported.isNotEmpty()) groups += RecGroup("Imported", imported)
     byTrack[null]?.let { groups += RecGroup("Other files", it) }
     return groups.map { g -> g.copy(entries = g.entries.sortedByDescending { createdAt(it) }) }
 }
@@ -85,7 +93,7 @@ fun RecordingsScreen(
     // Disk work stays off the UI thread; reloadKey re-lists after a delete.
     var recordings by remember { mutableStateOf<List<TakeEntry>?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
-    LaunchedEffect(controller.song.tracks, reloadKey) {
+    LaunchedEffect(controller.song.tracks, reloadKey, controller.importing) {
         recordings = withContext(Dispatchers.IO) { controller.allTakes() }
     }
 
@@ -115,17 +123,35 @@ fun RecordingsScreen(
     }
 
     Column(Modifier.fillMaxSize().background(Colors.bg).safeDrawingPadding()) {
+        // Android's file picker: a recorder plugged in as USB storage shows
+        // up there as a drive.
+        val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            controller.importRecordings(uris)
+        }
         ScreenTopBar(title = "Recordings", onBack = onBack, backLabel = "Song") {
-            Text(controller.song.name, style = DimStyle, modifier = Modifier.padding(end = 10.dp), maxLines = 1)
+            AppButton(
+                if (controller.importing) "Importing…" else "Import",
+                enabled = !controller.importing,
+                accent = Colors.amber,
+                onClick = { picker.launch(arrayOf("audio/*")) },
+                modifier = Modifier.padding(end = 8.dp),
+            )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Colors.line))
 
         val list = recordings
         val groups = remember(list, controller.song.tracks) { list?.let { grouped(controller, it) } }
+        LaunchedEffect(controller.message) {
+            if (controller.message != null) {
+                delay(4000)
+                controller.message = null
+            }
+        }
         Box(Modifier.fillMaxSize().padding(12.dp)) {
+            MessageBanner(controller, Modifier.align(Alignment.BottomCenter))
             when {
                 groups == null -> Text("…", style = DimStyle)
-                groups.isEmpty() -> Text("Nothing recorded in this song yet.", style = DimStyle)
+                groups.isEmpty() -> Text("Nothing recorded or imported in this song yet.", style = DimStyle)
                 else -> LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxWidth()) {
                     groups.forEach { group ->
                         item(key = "header-${group.title}") {

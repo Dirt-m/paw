@@ -91,6 +91,62 @@ internal fun releaseFollow(tl: TimelineState, controller: SongController) {
     if (controller.status.transport != TRANSPORT_STOPPED) tl.follow = false
 }
 
+/**
+ * Pan and pinch for the empty workspace under the last lane and beside Add
+ * track, which on a phone in portrait is the biggest and safest place to
+ * swipe. A touch that starts left of [lanesLeftPx] (the headers) or above
+ * [lanesBottomPx] (a lane, which has its own handler) is not ours, and a
+ * vertical drag belongs to the track-list scroll. A tap deselects.
+ */
+internal fun Modifier.emptyAreaGestures(
+    tl: TimelineState,
+    controller: SongController,
+    lanesLeftPx: Float,
+    lanesBottomPx: () -> Float,
+): Modifier = pointerInput(tl, lanesLeftPx) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        if (down.position.x < lanesLeftPx || down.position.y < lanesBottomPx()) {
+            return@awaitEachGesture
+        }
+        val slop = viewConfiguration.touchSlop
+        var acc = Offset.Zero
+        var panning = false
+        var pinching = false
+        while (true) {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.isEmpty()) {
+                if (!panning && !pinching) controller.selectedClip = null
+                break
+            }
+            if (pressed.size >= 2) {
+                pinching = true
+                val zoomChange = event.calculateZoom()
+                val panChange = event.calculatePan()
+                if (zoomChange != 1f) tl.zoom(zoomChange, event.calculateCentroid().x - lanesLeftPx)
+                if (panChange.x != 0f) tl.pan(panChange.x)
+                if (zoomChange != 1f || panChange.x != 0f) releaseFollow(tl, controller)
+                event.changes.forEach { it.consume() }
+                continue
+            }
+            val change = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+            val delta = change.positionChange()
+            if (!panning && !pinching) {
+                acc += delta
+                if (acc.getDistance() > slop) {
+                    if (kotlin.math.abs(acc.y) > kotlin.math.abs(acc.x)) return@awaitEachGesture
+                    panning = true
+                }
+            } else if (panning) {
+                change.consume()
+                tl.pan(delta.x)
+                if (delta.x != 0f) releaseFollow(tl, controller)
+            }
+        }
+    }
+}
+
 // -------------------------------------------------------------------- ruler --
 
 private sealed interface RulerMode {

@@ -128,7 +128,7 @@ class ScreenSnapshots {
             ProjectListScreen(
                 entries = entries,
                 onOpen = {}, onCreate = {}, onRename = { _, _ -> true },
-                onDelete = { _, _ -> },
+                onDelete = { _, _ -> }, onOpenSettings = {},
             )
         }
     }
@@ -153,7 +153,7 @@ class ScreenSnapshots {
         content {
             SongScreen(
                 controller = c,
-                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {},
+                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {}, onOpenMetronome = {},
             )
         }
     }
@@ -230,12 +230,13 @@ class ScreenSnapshots {
         val c = controller()
         content {
             OptionsScreen(
-                controller = c,
-                keepAwakeMode = org.paw.app.KeepAwakeMode.FiveMinutes,
-                onKeepAwakeMode = {},
-                latencyMs = 10.4f,
+                prefs = org.paw.app.AppPrefs.of(ApplicationProvider.getApplicationContext()),
+                songsPath = "Internal storage / Documents / PAW",
                 effectsPath = "/storage/emulated/0/Android/data/org.paw.app/files/effects",
                 onBack = {},
+                backLabel = "Song",
+                controller = c,
+                latencyMs = 10.4f,
             )
         }
         snap("options-portrait")
@@ -247,7 +248,7 @@ class ScreenSnapshots {
         content {
             SongScreen(
                 controller = c,
-                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {},
+                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {}, onOpenMetronome = {},
             )
         }
     }
@@ -331,12 +332,13 @@ class ScreenSnapshots {
         val c = controller()
         content {
             OptionsScreen(
-                controller = c,
-                keepAwakeMode = org.paw.app.KeepAwakeMode.FiveMinutes,
-                onKeepAwakeMode = {},
-                latencyMs = 10.4f,
+                prefs = org.paw.app.AppPrefs.of(ApplicationProvider.getApplicationContext()),
+                songsPath = "Internal storage / Documents / PAW",
                 effectsPath = "/storage/emulated/0/Android/data/org.paw.app/files/effects",
                 onBack = {},
+                backLabel = "Song",
+                controller = c,
+                latencyMs = 10.4f,
             )
         }
         snap("options-landscape")
@@ -349,7 +351,7 @@ class ScreenSnapshots {
         content {
             SongScreen(
                 controller = c,
-                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {},
+                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {}, onOpenMetronome = {},
                 initialView = org.paw.app.ui.SongView.Mix,
             )
         }
@@ -374,7 +376,7 @@ class ScreenSnapshots {
         content {
             SongScreen(
                 controller = c,
-                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {},
+                onBack = {}, onOpenTrack = {}, onOpenTakes = {}, onOpenOptions = {}, onOpenMetronome = {},
                 initialView = org.paw.app.ui.SongView.Mix,
             )
         }
@@ -406,11 +408,26 @@ class ScreenSnapshots {
             ProjectListScreen(
                 entries = entries,
                 onOpen = {}, onCreate = {}, onRename = { _, _ -> true },
-                onDelete = { _, _ -> },
+                onDelete = { _, _ -> }, onOpenSettings = {},
                 initialNaming = true,
             )
         }
         snap("projects-naming-portrait")
+    }
+
+    @Test
+    fun metronome_portrait() {
+        val c = controller()
+        content { org.paw.app.ui.MetronomeScreen(controller = c, onBack = {}) }
+        snap("metronome-portrait")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun metronome_landscape() {
+        val c = controller()
+        content { org.paw.app.ui.MetronomeScreen(controller = c, onBack = {}) }
+        snap("metronome-landscape")
     }
 
     /** Playhead far ahead of the view: the playhead chip on the right edge. */

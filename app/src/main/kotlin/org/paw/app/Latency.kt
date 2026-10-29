@@ -5,9 +5,10 @@ import android.content.Context
 // Round-trip latency compensation: recorded takes are shifted left on the
 // timeline by this many frames.
 //
-// The interface path uses the loopback rig's measurement, a real acoustic
-// round trip and more trustworthy than what the streams estimate about
-// themselves. Every other route uses what the open streams report, learned on
+// The reference interface (the M-Track Duo) uses the loopback rig's
+// measurement, a real acoustic round trip and more trustworthy than what the
+// streams estimate about themselves. Every other route, other interfaces
+// included, uses what the open streams report, learned on
 // first use and remembered per route: Bluetooth output alone runs 150-300 ms
 // against USB's 10, so one global constant would place a Bluetooth overdub a
 // fifth of a second late.
@@ -32,6 +33,8 @@ object Latency {
         AppPrefs.of(context).setRouteLatencyFrames(routeKey, reported)
     }
 
-    /** The loopback rig only ever measured an interface round trip. */
-    private fun isMeasuredPath(routeKey: String) = routeKey.startsWith("usb:")
+    /** The loopback rig only ever measured the Duo; another interface's
+     *  converters and buffering differ, so its own report beats that number. */
+    private fun isMeasuredPath(routeKey: String) =
+        routeKey.startsWith("usb:") && routeKey.contains("M-Track", ignoreCase = true)
 }

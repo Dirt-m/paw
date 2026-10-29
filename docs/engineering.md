@@ -54,8 +54,9 @@ Software input monitoring is a per-track opt-in. Armed tracks always meter their
 input; with monitoring on, the input also passes through the chain, the fader and the
 master. The Duo's hardware direct-monitor knob remains the zero-latency path.
 
-Latency compensation when placing takes is per output route. The interface path uses a
-measured constant (about 10 ms on the Duo, 480 frames at 48 kHz). Every other route
+Latency compensation when placing takes is per output route. The Duo uses a measured
+constant (about 10 ms, 480 frames at 48 kHz); other interfaces have not been measured
+and use what their streams report. Every other route
 uses what its open streams report, learned on first use and remembered per route.
 Bluetooth runs 150 to 300 ms against USB's 10, so one global constant would drop a
 Bluetooth overdub a fifth of a second late.
@@ -74,8 +75,16 @@ interfaces keep the Unprocessed preset with gain exactly 1.0, which is the bit-p
 path.
 
 The Duo over Android's USB stack: input 1 or 2 channels, 16-bit, 11.025 to 48 kHz;
-output 2 channels, 16-bit, 32/44.1/48 kHz. So the engine runs at 48 kHz, 16-bit, and
-takes land as 16-bit WAVs.
+output 2 channels, 16-bit, 32/44.1/48 kHz. So the engine runs at 48 kHz, and Duo
+takes land as 16-bit WAVs. The engine takes whatever sample format the input stream
+delivers and writes the take in that format, so a 24-bit interface gives 24-bit takes.
+
+The Xvive XV1-R is the second interface in view. Its USB Audio mode is UAC2, stereo in
+and out, fixed at 48 kHz, 24-bit; it records from its line in when something is
+plugged in and from its own mics otherwise, so the same mode covers "USB mic" use. Its
+mass storage mode turns its microSD card into a drive, and recordings are imported
+from there (`/XVIVE/XV_0001.wav` and on). The mode is chosen on the recorder at power
+on, so it cannot be an interface and a card reader at once.
 
 ## Effects
 
@@ -88,8 +97,20 @@ arm64, and control ports only, so no plugin GUIs.
 ## Model and storage
 
 Kotlin owns the truth. `Song` is an immutable model, serialized to `project.json` on
-every edit (conflated background writes, atomic rename, `.bak` rotation). One folder
-per song beside an `audio/` directory of takes. The engine only ever sees a flattened
+every edit (conflated background writes, atomic rename, `.bak` rotation). Settings that
+belong to one song (click, count-in, mic boost) are in the model; settings that apply
+to every song are in `AppPrefs`, written the moment they change. One folder per song
+beside an `audio/` directory of takes.
+
+Songs live in `Documents/PAW` so the Files app and a computer can reach them. The app
+creates them without a storage permission, which Android allows for files an app owns.
+The catch: after an uninstall, a reinstalled app no longer owns those files and cannot
+read the manifests, so songs would need to be brought back by hand. `adb install -r`
+and in-place updates are fine. Older installs kept songs in the app's private folder;
+`ProjectStore.migrate()` copies each song over, checks every file's size, and only
+then removes the old copy. A song that fails stays where it was and is still listed.
+A `.nomedia` file keeps music players from listing takes. Imported files go through
+`model/TakeImport.kt`. The engine only ever sees a flattened
 copy per track. On disk and in code, recordings are called takes.
 
 ## Things that bite
@@ -130,8 +151,7 @@ minSdk 31 (Android
 JDK 17 or newer, an Android SDK with NDK 28 and CMake 3.31, and a device on Android 12
 or newer. `./gradlew assembleDebug` builds; `adb install -r` upgrades in place and
 keeps the songs as long as the signing key matches. Back up
-`/sdcard/Android/data/org.paw.app/files/projects/` with `adb pull` before an install
-you are not sure about.
+`/sdcard/Documents/PAW/` with `adb pull` before an install you are not sure about.
 
 `tools/snapshots.sh` renders every screen on the JVM (Robolectric plus Roborazzi, no
 device) to `app/snapshots/`, both orientations at Pixel 9a size. It is the fast loop
@@ -143,4 +163,6 @@ Host-side C++ checks live in `tools/`: `engine_sanity.cpp` (WAV round trips, tim
 placement, mixdown) and `effects_sanity.cpp` (DSP behaviour per effect). The build line
 for each is in its header. Run them after touching the pure C++ layers.
 
-`WaveLinesTest` pins the waveform column arithmetic for trimmed clips.
+`WaveLinesTest` pins the waveform column arithmetic for trimmed clips. `TakeImportTest`
+covers the WAV import paths (bit exact copies, extensible headers, odd chunks, the
+resampler's accuracy and aliasing) with synthesized files.

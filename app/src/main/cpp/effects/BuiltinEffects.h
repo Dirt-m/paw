@@ -1,7 +1,7 @@
-// PAW! built-in effects: 3-band EQ, compressor, stereo delay, reverb,
+// PAW built-in effects: 3-band EQ, compressor, stereo delay, reverb,
 // chorus, noise gate, peak limiter, resonant filter.
 //
-// Copyright (C) 2026 PAW! contributors
+// Copyright (C) 2026 PAW contributors
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free

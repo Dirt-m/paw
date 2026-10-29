@@ -48,6 +48,14 @@ pressed them on the device. In rough order of risk:
    path. An abort in the callback would be a real finding.
 9. The dropdown menus (song menu, song-row menu), which the snapshot harness cannot
    capture.
+10. The Xvive XV1-R as an interface (input, output, 24-bit takes, latency placement
+    from the streams' own report), and importing from its card in mass storage mode.
+11. Importing compressed files (AAC, M4A, MP3) through the platform decoder; only WAV
+    import has run, on synthesized files.
+12. Songs in `Documents/PAW`: creating, recording, renaming and sharing a mixdown
+    from there, and the move of existing songs out of the private folder.
+13. Panning and pinching in the empty space under the lanes, and the new header
+    buttons (monitor, FX) under the finger.
 
 ## Known issues
 
@@ -85,12 +93,12 @@ pressed them on the device. In rough order of risk:
   here: model update, persist, push to engine. Also record collection, peaks cache,
   mixdown, undo.
 - `model/`: `Song.kt` (model and JSON), `ProjectStore.kt`, `InputDevice.kt`,
-  `EffectCatalog.kt`.
+  `EffectCatalog.kt`, `TakeImport.kt` (WAV parsing, resampling, platform decoding).
 - `Engine.kt` (JNI), `AudioDevices.kt` (endpoint enumeration), `AppPrefs.kt`,
   `Latency.kt`, `MainActivity.kt` (navigation, permissions, stream lifecycle).
 - `ui/`: `SongScreen.kt` (top bar, tracks view, selection row, transport),
   `Timeline.kt` (view window, ruler, lanes, waveforms), `MixerView.kt`,
-  `TrackDetailScreen.kt`, `RecordingsScreen.kt`, `OptionsScreen.kt`,
+  `TrackDetailScreen.kt`, `RecordingsScreen.kt`, `OptionsScreen.kt`, `MetronomeScreen.kt`,
   `ProjectListScreen.kt`, `Widgets.kt`, `Theme.kt`.
 - `app/src/test/kotlin/.../snap/`: the JVM snapshot harness (`ShadowEngine`,
   `Fixtures`, `ScreenSnapshots`). `app/src/test/kotlin/.../ui/WaveLinesTest.kt`.
