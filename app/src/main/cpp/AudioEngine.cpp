@@ -112,6 +112,7 @@ void AudioEngine::shutdown() {
     if (mRecordThread.joinable()) mRecordThread.join();
     // Threads are gone and the callback with them; free the graph directly.
     delete mTracksRT.exchange(nullptr);
+    delete mSamplesRT.exchange(nullptr);
     {
         std::lock_guard<std::mutex> lock(mControlMutex);
         drainRetiredLocked(true);
@@ -467,7 +468,11 @@ void AudioEngine::mixTracks(int frames, bool rolling, bool inputLive) {
     TrackArray* arr = mTracksRT.load(std::memory_order_acquire);
     const bool anySolo = mSoloCount.load(std::memory_order_relaxed) > 0;
 
-    int meterCount = 0;
+    // Two passes: every track's dry input first (ring and monitored input),
+    // then the sampler's voices on top, then each chain and fader. Voices
+    // land ahead of the chain so a sample plays through its track's effects.
+    float inPeaks[kMaxMeters] = {};
+    int trackIdx = 0;
     for (TrackRT* tr : arr->tracks) {
         auto* dst = reinterpret_cast<uint8_t*>(tr->scratch.data());
         const size_t wantBytes = static_cast<size_t>(frames) * 8;
@@ -499,6 +504,22 @@ void AudioEngine::mixTracks(int frames, bool rolling, bool inputLive) {
             }
         }
 
+        if (trackIdx < kMaxMeters) inPeaks[trackIdx] = inPeak;
+        ++trackIdx;
+    }
+
+    mVoices.adopt(mSamplesRT.load(std::memory_order_acquire));
+    SampleTrigger trig;
+    while (mTriggers.read(reinterpret_cast<uint8_t*>(&trig), sizeof trig) == sizeof trig)
+        mVoices.start(trig.index, trig.velocity);
+    mVoices.render(frames, [arr](int trackId) -> float* {
+        for (TrackRT* tr : arr->tracks)
+            if (tr->id == trackId) return tr->scratch.data();
+        return nullptr;
+    });
+
+    int meterCount = 0;
+    for (TrackRT* tr : arr->tracks) {
         EffectChain* chain = tr->chain.load(std::memory_order_acquire);
         if (chain) chain->process(tr->scratch.data(), frames);
 
@@ -513,7 +534,7 @@ void AudioEngine::mixTracks(int frames, bool rolling, bool inputLive) {
         // fader is down or monitoring is off.
         if (meterCount < kMaxMeters) {
             mMeterSlots[meterCount].id.store(tr->id, std::memory_order_relaxed);
-            mMeterSlots[meterCount].peak.store(std::max(peak, inPeak),
+            mMeterSlots[meterCount].peak.store(std::max(peak, inPeaks[meterCount]),
                                                std::memory_order_relaxed);
             ++meterCount;
         }
@@ -753,11 +774,12 @@ void AudioEngine::diskLoop() {
 // ---------------------------------------------------------------- control --
 
 void AudioEngine::retireLocked(TrackArray* array, EffectChain* chain,
-                               std::shared_ptr<TrackRT> track) {
+                               std::shared_ptr<TrackRT> track, SampleBank* bank) {
     Retired r;
     r.array = array;
     r.chain = chain;
     r.track = std::move(track);
+    r.bank = bank;
     // Sampled after the caller published the replacement: any burst that can
     // still hold the old pointer started at or before this tick, so it has
     // finished by the time two further bursts have started.
@@ -783,6 +805,7 @@ void AudioEngine::drainRetiredLocked(bool force) {
         }
         delete r.array;
         delete r.chain;
+        delete r.bank;
         r.track.reset();  // last reference: ~TrackRT deletes its chain and ring
     }
     mRetired.resize(keep);
@@ -876,6 +899,8 @@ void AudioEngine::resetSongScopeLocked() {
     EffectChain* masterChain = mMaster.chain.exchange(nullptr, std::memory_order_acq_rel);
 
     rebuildTrackArrayLocked();  // the new array is empty
+    if (SampleBank* bank = mSamplesRT.exchange(nullptr, std::memory_order_acq_rel))
+        retireLocked(nullptr, nullptr, nullptr, bank);
     if (masterChain) retireLocked(nullptr, masterChain, nullptr);
     for (auto& tr : doomed) retireLocked(nullptr, nullptr, std::move(tr));
 
@@ -1368,6 +1393,22 @@ void AudioEngine::recordLoop() {
         }
         sleepMs(2);
     }
+}
+
+// ---------------------------------------------------------------- sampler --
+
+void AudioEngine::setSamples(int64_t gen, std::unique_ptr<SampleBank> bank) {
+    PAW_ASSERT_CONTROL();
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    if (!acceptGenLocked(gen, "setSamples")) return;  // bank freed on the way out
+    SampleBank* old = mSamplesRT.exchange(bank.release(), std::memory_order_acq_rel);
+    if (old) retireLocked(nullptr, nullptr, nullptr, old);
+}
+
+void AudioEngine::triggerSample(int index, float velocity) {
+    PAW_ASSERT_CONTROL();
+    const SampleTrigger trig{index, velocity};
+    mTriggers.write(reinterpret_cast<const uint8_t*>(&trig), sizeof trig);
 }
 
 void AudioEngine::setChainControl(int64_t gen, int trackId, int unitIdx, int controlIdx,

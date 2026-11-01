@@ -10,6 +10,7 @@ add_library(paw-engine SHARED
         Mixdown.cpp
         Peaks.cpp
         RtCheck.cpp
+        Sampler.cpp
         Timeline.cpp
         WavFile.cpp
         effects/BuiltinEffects.cpp)

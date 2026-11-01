@@ -13,9 +13,12 @@ master bus, device-aware input and output routing, latency-compensated take plac
 per output route, punch-in, count-in, metronome, gapless loop playback, eight LADSPA
 built-ins plus a plugin folder, mixdown to the share sheet, and a recordings browser.
 
-Not built yet: the sampler (samples, sample tracks, hits, the sampler screen), the
-meter map with groupings and changes, and the four percussion effects. Until then a
-song has one time signature, stored as a beat count.
+The sampler's playing path is built: samples are read into memory and played by a
+voice pool in the audio callback, through their track's effects, from a Sampler screen
+where every clip on the timeline is a tile. Not built yet: samples as their own
+tracks, hits and their lanes, recording taps, the meter map with groupings and
+changes, and the four percussion effects. Until then a song has one time signature,
+stored as a beat count.
 
 ## Verified on the phone
 
@@ -34,31 +37,35 @@ On a Pixel 9a with an M-Audio M-Track Duo, in daily use:
 Built, and passing whatever host-side check exists, but nobody has listened to them or
 pressed them on the device. In rough order of risk:
 
-1. Ruler gestures: tap to seek, drag to pan, hold and drag to paint a loop, dragging a
+1. The sampler: how long a touch takes to sound (tap a tile against the click, and
+   listen), two fingers on two tiles at once, fast rolls on one tile, playing over
+   song playback, and a sample through a track with effects. The debug build's
+   allocation tripwire must stay quiet while tiles are hammered.
+2. Ruler gestures: tap to seek, drag to pan, hold and drag to paint a loop, dragging a
    loop tab to resize it.
-2. Mix faders under playback. Bluetooth playback while recording through the Duo (two
+3. Mix faders under playback. Bluetooth playback while recording through the Duo (two
    clock domains; listen for drift over a long take). Backgrounding the app returns
    the rest of the phone to Bluetooth. Backgrounding mid-take keeps recording.
-3. Effects: live parameter sweeps without zipper noise, bypass and wet/dry without
+4. Effects: live parameter sweeps without zipper noise, bypass and wet/dry without
    clicks, reorder mid-play, a third-party `.so` loading, mixdown with reverb,
    chorus, gate, limiter and filter in the chain.
-4. Count-in take placement against the click (record to the click, check alignment
+5. Count-in take placement against the click (record to the click, check alignment
    in another DAW), and the same over a Bluetooth route.
-5. Long loop runs (drift, seam, underruns over minutes).
-6. Unplugging the Duo mid-record: takes finalize, no ANR, reopen works. `kill -9`
+6. Long loop runs (drift, seam, underruns over minutes).
+7. Unplugging the Duo mid-record: takes finalize, no ANR, reopen works. `kill -9`
    mid-record: the take is readable and placeable afterwards.
-7. Rotation mid-play and mid-record.
-8. The debug build's real-time allocation tripwire staying quiet through Oboe's read
+8. Rotation mid-play and mid-record.
+9. The debug build's real-time allocation tripwire staying quiet through Oboe's read
    path. An abort in the callback would be a real finding.
-9. The dropdown menus (song menu, song-row menu), which the snapshot harness cannot
+10. The dropdown menus (song menu, song-row menu), which the snapshot harness cannot
    capture.
-10. The Xvive XV1-R as an interface (input, output, 24-bit takes, latency placement
+11. The Xvive XV1-R as an interface (input, output, 24-bit takes, latency placement
     from the streams' own report), and importing from its card in mass storage mode.
-11. Importing compressed files (AAC, M4A, MP3) through the platform decoder; only WAV
+12. Importing compressed files (AAC, M4A, MP3) through the platform decoder; only WAV
     import has run, on synthesized files.
-12. Songs in `Documents/PAW`: creating, recording, renaming and sharing a mixdown
+13. Songs in `Documents/PAW`: creating, recording, renaming and sharing a mixdown
     from there, and the move of existing songs out of the private folder.
-13. Panning and pinching in the empty space under the lanes, and the new header
+14. Panning and pinching in the empty space under the lanes, and the new header
     buttons (monitor, FX) under the finger.
 
 ## Known issues
@@ -91,7 +98,8 @@ pressed them on the device. In rough order of risk:
 - `app/src/main/cpp/Timeline.{h,cpp}`: `ClipRef` and the clip-window renderer shared
   by the disk thread and mixdown.
 - `app/src/main/cpp/WavFile.{h,cpp}`, `Peaks.{h,cpp}`, `RingBuffer.h`, `Mixdown.{h,cpp}`,
-  `EffectHost.{h,cpp}` (LADSPA host), `effects/` (the built-ins and `ladspa.h`),
+  `EffectHost.{h,cpp}` (LADSPA host), `Sampler.{h,cpp}` (samples in memory, the
+  voice pool), `effects/` (the built-ins and `ladspa.h`),
   `jni_bridge.cpp`.
 - `app/src/main/kotlin/org/paw/app/SongController.kt`: every edit goes through
   here: model update, persist, push to engine. Also record collection, peaks cache,
@@ -102,7 +110,7 @@ pressed them on the device. In rough order of risk:
   `Latency.kt`, `MainActivity.kt` (navigation, permissions, stream lifecycle).
 - `ui/`: `SongScreen.kt` (top bar, tracks view, selection row, transport),
   `Timeline.kt` (view window, ruler, lanes, waveforms), `MixerView.kt`,
-  `TrackDetailScreen.kt`, `RecordingsScreen.kt`, `OptionsScreen.kt`, `MetronomeScreen.kt`,
+  `TrackDetailScreen.kt`, `RecordingsScreen.kt`, `OptionsScreen.kt`, `MetronomeScreen.kt`, `SamplerScreen.kt`,
   `ProjectListScreen.kt`, `Widgets.kt`, `Theme.kt`.
 - `app/src/test/kotlin/.../snap/`: the JVM snapshot harness (`ShadowEngine`,
   `Fixtures`, `ScreenSnapshots`). `app/src/test/kotlin/.../ui/WaveLinesTest.kt`.

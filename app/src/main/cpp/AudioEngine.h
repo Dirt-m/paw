@@ -14,6 +14,7 @@
 
 #include "RingBuffer.h"
 #include "RtCheck.h"
+#include "Sampler.h"
 #include "Timeline.h"
 #include "WavFile.h"
 
@@ -175,6 +176,16 @@ public:
     void setChainControl(int64_t gen, int trackId, int unitIdx, int controlIdx, float value);
     void setChainUnitState(int64_t gen, int trackId, int unitIdx, bool bypass, float mix);
 
+    // Sampler. setSamples installs the song's samples, already read into
+    // memory by the caller (which keeps that file I/O off the control lock);
+    // a stale generation's bank is deleted rather than installed. Voices
+    // sounding from the old bank stop.
+    void setSamples(int64_t gen, std::unique_ptr<SampleBank> bank);
+    // Starts sample index on the next burst, with or without the transport.
+    // Lock-free; one producer only, which is the UI thread. A full queue
+    // drops the touch rather than block.
+    void triggerSample(int index, float velocity);
+
     // Transport. Total and idempotent commands that decide under the engine's
     // own lock and report what happened, so no caller has to branch on a copy
     // of the state that is up to a poll interval old.
@@ -331,12 +342,13 @@ private:
     };
 
     // One retired graph object, waiting out the callback. Exactly one of the
-    // three is set; the shared_ptr form keeps a removed TrackRT (and the chain
+    // four is set; the shared_ptr form keeps a removed TrackRT (and the chain
     // its destructor deletes) alive past the last disk-thread reference.
     struct Retired {
         TrackArray* array = nullptr;
         EffectChain* chain = nullptr;
         std::shared_ptr<TrackRT> track;
+        SampleBank* bank = nullptr;
         uint64_t tick = 0;
     };
 
@@ -384,7 +396,8 @@ private:
     // replacement is published: the tick is sampled here, and sampling it
     // before the swap would let a burst that already read the old pointer run
     // past the two-tick window.
-    void retireLocked(TrackArray* array, EffectChain* chain, std::shared_ptr<TrackRT> track);
+    void retireLocked(TrackArray* array, EffectChain* chain, std::shared_ptr<TrackRT> track,
+                      SampleBank* bank = nullptr);
     void drainRetiredLocked(bool force);
     void wakeDiskLocked();
     void wakeRecordLocked();
@@ -448,6 +461,16 @@ private:
 
     // Mix scratch (callback only).
     std::vector<float> mMixBuf;
+
+    // Sampler. The bank is published like the track array; the voices and
+    // the trigger queue's read side belong to the callback.
+    struct SampleTrigger {
+        int32_t index;
+        float velocity;
+    };
+    std::atomic<SampleBank*> mSamplesRT{nullptr};
+    RingBuffer mTriggers{sizeof(SampleTrigger) * 256};
+    VoicePool mVoices;
 
     // Metronome / count-in / loop.
     std::atomic<bool> mClickEnabled{false};
