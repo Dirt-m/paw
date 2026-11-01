@@ -38,7 +38,6 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -78,7 +77,8 @@ class TimelineState {
      *  as glitching, not following. */
     var follow by mutableStateOf(true)
 
-    /** Width of the lane viewport, reported by the first lane to lay out. */
+    /** Width of the lane viewport, reported by the workspace behind the
+     *  lanes in layout (a draw-phase write is not reliably observed). */
     var laneWidthPx by mutableFloatStateOf(0f)
 
     fun pxOf(frame: Long): Float = (frame - originFrame) / framesPerPx
@@ -120,11 +120,13 @@ internal fun releaseFollow(tl: TimelineState, controller: SongController) {
 }
 
 /**
- * Pan and pinch for the empty workspace under the last lane and beside Add
- * track, which on a phone in portrait is the biggest and safest place to
- * swipe. A touch that starts left of [lanesLeftPx] (the headers) or above
- * [lanesBottomPx] (a lane, which has its own handler) is not ours, and a
- * vertical drag belongs to the track-list scroll. A tap deselects.
+ * Pan and pinch for the empty workspace under the last lane, which on a phone
+ * in portrait is the biggest and safest place to swipe. A touch that starts
+ * left of [lanesLeftPx] (the headers) or above [lanesBottomPx] (a lane, which
+ * has its own handler) is not ours, and a vertical drag belongs to the
+ * track-list scroll. A tap deselects, unless something under it already took
+ * the touch. [lanesBottomPx] is called on every touch, long after the first
+ * composition, so it must read state rather than capture values.
  */
 internal fun Modifier.emptyAreaGestures(
     tl: TimelineState,
@@ -134,7 +136,7 @@ internal fun Modifier.emptyAreaGestures(
 ): Modifier = pointerInput(tl, lanesLeftPx) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
-        if (down.position.x < lanesLeftPx || down.position.y < lanesBottomPx()) {
+        if (down.isConsumed || down.position.x < lanesLeftPx || down.position.y < lanesBottomPx()) {
             return@awaitEachGesture
         }
         val slop = viewConfiguration.touchSlop
@@ -145,7 +147,8 @@ internal fun Modifier.emptyAreaGestures(
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
             if (pressed.isEmpty()) {
-                if (!panning && !pinching) controller.selectedClip = null
+                val taken = event.changes.any { it.isConsumed }
+                if (!panning && !pinching && !taken) controller.selectedClip = null
                 break
             }
             if (pressed.size >= 2) {
@@ -189,9 +192,9 @@ private sealed interface RulerMode {
 
 /**
  * The ruler over the lanes, in bars (or seconds when the clock reads time).
- * Tap seeks, drag pans, pinch zooms. Drag a loop tab to move that edge, or
- * hold anywhere and drag to paint a new region; both land on the snap grid.
- * The ✕ beside the right tab clears the region.
+ * Tap seeks and brings follow back, drag pans, pinch zooms. Drag a loop tab
+ * to move that edge, or hold anywhere and drag to paint a new region; both
+ * land on the snap grid. The ✕ beside the right tab clears the region.
  */
 @Composable
 fun Ruler(
@@ -222,18 +225,23 @@ fun Ruler(
                         var mode: RulerMode = RulerMode.Undecided
                         val s = controller.song
                         fun snapped(x: Float) = s.snapFrame(tl.frameAt(x).coerceAtLeast(0), ui.snap)
-                        val hasRegion = s.loopEnd > s.loopStart
-                        // A finger landing on a loop edge grabs it straight away.
-                        if (hasRegion) {
+                        // A finger near a loop edge grabs it once it moves or
+                        // holds; a plain tap there still seeks, since the
+                        // loop start is just where a musician seeks to.
+                        var edge: RulerMode.Edge? = null
+                        if (s.loopEnd > s.loopStart) {
                             val dl = kotlin.math.abs(down.position.x - tl.pxOf(s.loopStart))
                             val dr = kotlin.math.abs(down.position.x - tl.pxOf(s.loopEnd))
                             if (dl < edgeGrabPx && dl <= dr) {
-                                mode = RulerMode.Edge(left = true, otherEdge = s.loopEnd)
-                                loopDrag = s.loopStart to s.loopEnd
+                                edge = RulerMode.Edge(left = true, otherEdge = s.loopEnd)
                             } else if (dr < edgeGrabPx) {
-                                mode = RulerMode.Edge(left = false, otherEdge = s.loopStart)
-                                loopDrag = s.loopStart to s.loopEnd
+                                edge = RulerMode.Edge(left = false, otherEdge = s.loopStart)
                             }
+                        }
+                        fun grab(e: RulerMode.Edge, x: Float) {
+                            mode = e
+                            val f = snapped(x)
+                            loopDrag = if (e.left) f to e.otherEdge else e.otherEdge to f
                         }
                         val pressStart = down.uptimeMillis
 
@@ -247,16 +255,24 @@ fun Ruler(
                                 awaitPointerEvent()
                             }
                             if (event == null) {
-                                val f = snapped(down.position.x)
-                                mode = RulerMode.Mark(f)
-                                loopDrag = f to f
+                                val e = edge
+                                if (e != null) {
+                                    grab(e, down.position.x)
+                                } else {
+                                    val f = snapped(down.position.x)
+                                    mode = RulerMode.Mark(f)
+                                    loopDrag = f to f
+                                }
                                 continue
                             }
                             val pressed = event.changes.filter { it.pressed }
                             if (pressed.isEmpty()) {
                                 val region = loopDrag?.let { (a, b) -> minOf(a, b) to maxOf(a, b) }
                                 when (mode) {
-                                    is RulerMode.Undecided -> controller.seek(tl.frameAt(down.position.x))
+                                    is RulerMode.Undecided -> {
+                                        controller.seek(tl.frameAt(down.position.x))
+                                        tl.follow = true
+                                    }
                                     is RulerMode.Mark -> region?.let { (lo, hi) ->
                                         // A hold without a drag marks nothing.
                                         if (hi > lo) controller.setLoopRegion(lo, hi)
@@ -293,7 +309,15 @@ fun Ruler(
                             when (val m = mode) {
                                 is RulerMode.Undecided -> {
                                     acc += delta
-                                    if (acc.getDistance() > slop) mode = RulerMode.Pan
+                                    if (acc.getDistance() > slop) {
+                                        val e = edge
+                                        if (e != null) {
+                                            change.consume()
+                                            grab(e, x)
+                                        } else {
+                                            mode = RulerMode.Pan
+                                        }
+                                    }
                                 }
                                 is RulerMode.Pan -> {
                                     change.consume()
@@ -548,7 +572,6 @@ fun Overview(
         modifier
             .clipToBounds()
             .background(Colors.bg)
-            .onSizeChanged { if (tl.laneWidthPx <= 0f) tl.laneWidthPx = it.width.toFloat() }
             .pointerInput(tl) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -741,9 +764,6 @@ fun ClipLane(
             .clipToBounds()
             .background(Colors.bg)
             .then(if (trackSelected) Modifier.background(Colors.accent.copy(alpha = 0.05f)) else Modifier)
-            // Measured in layout, not draw: a draw-phase write isn't reliably
-            // observed by the composition that reads this.
-            .onSizeChanged { tl.laneWidthPx = it.width.toFloat() }
             .pointerInput(track.id, tl) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -776,6 +796,7 @@ fun ClipLane(
                                 val hit = clips.lastOrNull { frame >= it.start && frame < it.end }
                                 controller.selectedClip = hit?.let { track.id to it.id }
                                 onSelectTrack(track.id)
+                                event.changes.forEach { it.consume() }
                             } else {
                                 commit()
                             }

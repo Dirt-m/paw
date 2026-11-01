@@ -3,6 +3,9 @@ package org.paw.app.snap
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performSemanticsAction
 import org.junit.Test
 import org.paw.app.SongController
 import org.paw.app.ui.SongUi
@@ -32,24 +35,24 @@ class TracksSnapshots : SnapshotBase() {
     /** The beat track's pattern clip selected. */
     @Test fun song_pattern_selected_portrait() {
         val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
-        songWith(c); snap("song-pattern-selected-portrait")
+        songWith(c); showBeatLane(); snap("song-pattern-selected-portrait")
     }
 
     @Test @Config(qualifiers = "+land")
     fun song_pattern_selected_landscape() {
         val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
-        songWith(c); snap("song-pattern-selected-landscape")
+        songWith(c); showBeatLane(); snap("song-pattern-selected-landscape")
     }
 
     /** The pattern chooser swapped into the clip bar. */
     @Test fun song_pattern_chooser_portrait() {
         val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
-        songWith(c)
+        songWith(c); showBeatLane()
         compose.onNodeWithText("Groove ▾").performClick()
         snap("song-pattern-chooser-portrait")
     }
 
-    /** More on an audio clip: the bar wraps to a second row. */
+    /** More on an audio clip: the rarer actions in the same one-row slot. */
     @Test fun song_clip_more_portrait() {
         val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
         songWith(c)
@@ -59,7 +62,7 @@ class TracksSnapshots : SnapshotBase() {
 
     @Test fun song_pattern_more_portrait() {
         val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
-        songWith(c)
+        songWith(c); showBeatLane()
         compose.onNodeWithContentDescription("More").performClick()
         snap("song-pattern-more-portrait")
     }
@@ -94,14 +97,14 @@ class TracksSnapshots : SnapshotBase() {
     @Test fun song_beat_lane_ghost_portrait() {
         val c = demoController(app) { ShadowEngine.playheadFrame = 48000L * 11 }
         c.selectedTrack = 5
-        songWith(c); snap("song-beat-ghost-portrait")
+        songWith(c); showBeatLane(); snap("song-beat-ghost-portrait")
     }
 
     @Test @Config(qualifiers = "+land")
     fun song_beat_lane_ghost_landscape() {
         val c = demoController(app) { ShadowEngine.playheadFrame = 48000L * 11 }
         c.selectedTrack = 5
-        songWith(c); snap("song-beat-ghost-landscape")
+        songWith(c); showBeatLane(); snap("song-beat-ghost-landscape")
     }
 
     private fun recordingController() = demoController(app) {
@@ -157,6 +160,20 @@ class TracksSnapshots : SnapshotBase() {
         songWith(c)
         repeat(4) { compose.onNodeWithText("+").performClick() }
         snap("song-zoomed-in-portrait")
+    }
+
+    /** The demo's beat track is the last lane, below the fold at full lane height. */
+    private fun showBeatLane() {
+        // The insets first: they shrink the viewport, and a scroll made
+        // before them would stop short of the end.
+        applyPhoneInsets()
+        compose.waitForIdle()
+        val scrollers = compose.onAllNodes(hasScrollAction()).fetchSemanticsNodes().indices
+        for (i in scrollers) {
+            compose.onAllNodes(hasScrollAction())[i]
+                .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        }
+        compose.waitForIdle()
     }
 
     /**

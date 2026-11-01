@@ -3,8 +3,6 @@ package org.paw.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -80,7 +78,7 @@ internal fun ClipBar(
                 }
                 MoreButton { page = ClipPage.More }
             }
-            ClipPage.More -> MorePage(controller, ui, track, clip, compact, rowH) { page = it }
+            ClipPage.More -> MorePage(controller, ui, track, clip, rowH) { page = it }
             ClipPage.Patterns -> PatternsPage(controller, track, clip, rowH) { page = it }
             ClipPage.Takes -> TakesPage(controller, ui, track, clip, compact, rowH) { page = it }
         }
@@ -159,24 +157,28 @@ private fun RowScope.PatternMain(
 }
 
 /**
- * The rarer actions. A phone wraps them onto a second row, so the bar grows
- * upward while it is open; the landscape top bar has one row and scrolls.
+ * The rarer actions, in the same one-row slot as the main page: the row
+ * scrolls sideways rather than growing, so the lanes above never move.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MorePage(
     controller: SongController,
     ui: SongUi,
     track: Track,
     clip: Clip,
-    compact: Boolean,
     rowH: Dp,
     go: (ClipPage) -> Unit,
 ) {
     val song = controller.song
     val idx = song.tracks.indexOfFirst { it.id == track.id }
+    // A clip only moves to a neighbour that holds its kind.
+    fun canMoveTo(i: Int) = song.tracks.getOrNull(i)?.kind == track.kind
     val under = controller.clipsUnder(track.id, clip.id)
-    val items: @Composable () -> Unit = {
+    Row(
+        Modifier.fillMaxWidth().height(rowH).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         PageBack { go(ClipPage.Main) }
         if (clip.isPattern) {
             SplitButton(controller, ui, track.id, clip, Modifier)
@@ -188,27 +190,13 @@ private fun MorePage(
                 onClick = { ui.open(SongPanel.SampleToKit(track.id, clip.id)) })
         }
         AppButton("Loop clip", fontSize = 12.sp, padding = 10.dp, onClick = { controller.setLoopRegion(clip.start, clip.end) })
-        AppButton("Move ▲", enabled = idx > 0, fontSize = 12.sp, padding = 10.dp,
+        AppButton("Move ▲", enabled = canMoveTo(idx - 1), fontSize = 12.sp, padding = 10.dp,
             onClick = { controller.moveClipToTrack(track.id, clip.id, -1) })
-        AppButton("Move ▼", enabled = idx in 0 until song.tracks.size - 1, fontSize = 12.sp, padding = 10.dp,
+        AppButton("Move ▼", enabled = canMoveTo(idx + 1), fontSize = 12.sp, padding = 10.dp,
             onClick = { controller.moveClipToTrack(track.id, clip.id, 1) })
         if (under.isNotEmpty()) {
             AppButton("Takes ${under.size}", fontSize = 12.sp, padding = 10.dp, onClick = { go(ClipPage.Takes) })
         }
-    }
-    if (compact) {
-        FlowRow(
-            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) { items() }
-    } else {
-        Row(
-            Modifier.fillMaxWidth().height(rowH).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) { items() }
     }
 }
 

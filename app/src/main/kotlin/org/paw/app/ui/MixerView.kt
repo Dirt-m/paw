@@ -53,7 +53,8 @@ import org.paw.app.model.Track
 // strips fills the row exactly; the strips scroll and snap a strip at a time.
 // Tall windows put a row of track chips on top to jump along a long song and
 // to add tracks. Short ones (phone landscape) spend all the height on the
-// fader: mute and solo sit beside it, and adding lives at the end of the row.
+// fader: mute and solo sit beside it, and adding is a narrow column after the
+// last strip.
 
 private val GAP = 6.dp
 private val STRIP_PAD = 4.dp
@@ -61,6 +62,7 @@ private val STRIP_MIN_TALL = 92.dp
 private val STRIP_MIN_SHORT = 112.dp
 private val INDEX_ROW_H = 52.dp
 private val READOUT_H = 28.dp
+private val ADD_COLUMN_W = 76.dp
 private val ControlShape = RoundedCornerShape(Dimens.corner)
 
 @Composable
@@ -73,11 +75,11 @@ fun MixerView(
     val strips = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val openTrack: (Int) -> Unit = {
-        controller.selectedTrack = it
+        selectTrack(controller, ui, it)
         ui.open(SongPanel.Inspector(it))
     }
     val openFx: (Int) -> Unit = {
-        controller.selectedTrack = it
+        selectTrack(controller, ui, it)
         ui.open(SongPanel.Inspector(it, InspectorTab.Fx))
     }
     // A new track lands at the end of the row; bring it on screen.
@@ -87,7 +89,7 @@ fun MixerView(
         Unit
     }
     val addBeat = {
-        controller.addBeatTrack()
+        selectTrack(controller, ui, controller.addBeatTrack())
         scope.launch { strips.animateScrollToItem(controller.song.tracks.lastIndex) }
         Unit
     }
@@ -120,7 +122,7 @@ fun MixerView(
                             onFx = { openFx(track.id) },
                         )
                     }
-                    item(key = "add") { AddStrip(stripW, addAudio, addBeat) }
+                    if (short) item(key = "add") { AddColumn(addAudio, addBeat) }
                 }
                 Box(Modifier.padding(top = GAP, bottom = GAP, end = GAP)) {
                     MasterStrip(
@@ -191,7 +193,7 @@ private fun StripIndex(
                 onClick = { onJump(i) },
             )
         }
-        item(key = "add-audio") { AddChip("+ Track", onAddAudio) }
+        item(key = "add-audio") { AddChip("+ Audio", onAddAudio) }
         item(key = "add-beat") { AddChip("+ Beat", onAddBeat) }
     }
 }
@@ -373,7 +375,7 @@ private fun PanRow(track: Track, controller: SongController, modifier: Modifier 
 
 @Composable
 private fun MuteToggle(track: Track, controller: SongController, modifier: Modifier = Modifier) {
-    Toggle("M", track.mute, Colors.accent, modifier = modifier, onClick = {
+    Toggle("M", track.mute, Colors.warn, modifier = modifier, onClick = {
         controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
     })
 }
@@ -479,19 +481,16 @@ private fun MasterStrip(
     }
 }
 
-/** The end of the row: a new audio or beat track. */
+/** After the last strip in a short window: a new audio or beat track, in
+ *  less width than a strip, since the chip row that adds them in a tall
+ *  window is not there. */
 @Composable
-private fun AddStrip(width: Dp, onAddAudio: () -> Unit, onAddBeat: () -> Unit) {
+private fun AddColumn(onAddAudio: () -> Unit, onAddBeat: () -> Unit) {
     Column(
-        Modifier
-            .width(width)
-            .fillMaxHeight()
-            .border(1.dp, Colors.line)
-            .padding(STRIP_PAD),
+        Modifier.width(ADD_COLUMN_W).fillMaxHeight(),
         verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        AppButton("+ Track", accent = Colors.accent, onClick = onAddAudio, padding = 6.dp, modifier = Modifier.fillMaxWidth())
-        AppButton("+ Beat", accent = Colors.accent, onClick = onAddBeat, padding = 6.dp, modifier = Modifier.fillMaxWidth())
+        AppButton("+ Audio", accent = Colors.accent, onClick = onAddAudio, padding = 4.dp, fontSize = 12.sp, modifier = Modifier.fillMaxWidth())
+        AppButton("+ Beat", accent = Colors.accent, onClick = onAddBeat, padding = 4.dp, fontSize = 12.sp, modifier = Modifier.fillMaxWidth())
     }
 }

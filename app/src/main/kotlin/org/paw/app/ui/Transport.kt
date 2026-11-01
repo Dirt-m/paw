@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,10 +50,19 @@ internal fun TransportBar(
     val song = controller.song
     val rolling = status.transport != TRANSPORT_STOPPED
 
+    // Every start of the transport follows the playhead again, whatever a
+    // pan during the last take turned off.
+    LaunchedEffect(controller, tl) {
+        snapshotFlow { controller.status.transport != TRANSPORT_STOPPED }
+            .collect { if (it) tl.follow = true }
+    }
+
     val toStart: @Composable (Modifier) -> Unit = { m ->
         AppButton("|◀", onClick = {
-            // Already at the start: snap the view there instead.
-            if (controller.playheadFrame == 0L) tl.originFrame = 0 else controller.seek(0)
+            // Rolling, follow brings the view along; stopped, it moves here.
+            tl.follow = true
+            controller.seek(0)
+            if (controller.status.transport == TRANSPORT_STOPPED) tl.originFrame = 0
         }, modifier = m, height = Dimens.touchBig, fontSize = 16.sp, padding = 0.dp)
     }
     val play: @Composable (Modifier) -> Unit = { m ->
@@ -78,7 +89,7 @@ internal fun TransportBar(
         // The tempo is read before every take, so it sits beside the click
         // it drives; a tap opens the tempo panel to change it.
         TempoButton(song.tempoBpm, song.beatsPerBar, song.beatUnit) { ui.open(SongPanel.Tempo) }
-        Toggle("Click", controller.clickEnabled, Colors.accent, onClick = {
+        Toggle("Click", controller.clickEnabled, Colors.green, onClick = {
             controller.setClick(!controller.clickEnabled)
         })
         Toggle("Loop", song.loopEnabled, Colors.green, onClick = { toggleLoop(controller) })
