@@ -310,7 +310,7 @@ fun Modifier.panel(): Modifier = this
 /** Inline confirmation that replaces the control that asked for it. */
 @Composable
 fun ConfirmRow(
-    prompt: String,
+    question: String,
     confirmLabel: String,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
@@ -323,7 +323,7 @@ fun ConfirmRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            prompt,
+            question,
             style = BodyStyle.copy(color = accent),
             modifier = Modifier.weight(1f),
             maxLines = 2,
@@ -434,7 +434,12 @@ fun MiniSlider(
     centerTick: Boolean = false,
 ) {
     val current = androidx.compose.runtime.rememberUpdatedState(value)
+    // The gesture blocks outlive a composition; reading the callbacks through
+    // these keeps a slider that now shows another track from driving the old one.
     val reset = androidx.compose.runtime.rememberUpdatedState(onReset)
+    val moved = androidx.compose.runtime.rememberUpdatedState(onChange)
+    val start = androidx.compose.runtime.rememberUpdatedState(onStart)
+    val commit = androidx.compose.runtime.rememberUpdatedState(onCommit)
     Canvas(
         modifier
             .then(if (vertical) Modifier.width(36.dp) else Modifier.height(36.dp))
@@ -447,23 +452,23 @@ fun MiniSlider(
                 var pos = 0f
                 if (vertical) {
                     detectVerticalDragGestures(
-                        onDragStart = { pos = current.value; onStart?.invoke() },
-                        onDragEnd = { onCommit?.invoke() },
-                        onDragCancel = { onCommit?.invoke() },
+                        onDragStart = { pos = current.value; start.value?.invoke() },
+                        onDragEnd = { commit.value?.invoke() },
+                        onDragCancel = { commit.value?.invoke() },
                     ) { change, dy ->
                         change.consume()
                         pos = (pos - dy / size.height).coerceIn(0f, 1f)
-                        onChange(pos)
+                        moved.value(pos)
                     }
                 } else {
                     detectHorizontalDragGestures(
-                        onDragStart = { pos = current.value; onStart?.invoke() },
-                        onDragEnd = { onCommit?.invoke() },
-                        onDragCancel = { onCommit?.invoke() },
+                        onDragStart = { pos = current.value; start.value?.invoke() },
+                        onDragEnd = { commit.value?.invoke() },
+                        onDragCancel = { commit.value?.invoke() },
                     ) { change, dx ->
                         change.consume()
                         pos = (pos + dx / size.width).coerceIn(0f, 1f)
-                        onChange(pos)
+                        moved.value(pos)
                     }
                 }
             },
@@ -513,12 +518,13 @@ fun ValueReadout(
     style: androidx.compose.ui.text.TextStyle = MonoStyle,
     onReset: (() -> Unit)? = null,
 ) {
+    val reset = androidx.compose.runtime.rememberUpdatedState(onReset)
     Text(
         text,
         style = style,
         maxLines = 1,
         modifier = modifier.then(
-            if (onReset != null) Modifier.pointerInput(Unit) { detectTapGestures(onDoubleTap = { onReset() }) }
+            if (onReset != null) Modifier.pointerInput(Unit) { detectTapGestures(onDoubleTap = { reset.value?.invoke() }) }
             else Modifier,
         ),
     )
@@ -911,20 +917,6 @@ val MoreGlyph: Glyph = { c ->
 /** The record-arm dot. */
 val ArmGlyph: Glyph = { c -> drawCircle(c, radius = size.width * 0.28f) }
 
-/** A 2 by 2 block of pads: the kit. */
-val PadsGlyph: Glyph = { c ->
-    val g = size.width * 0.12f
-    val cell = (size.width - 3 * g) / 2f
-    for (r in 0..1) for (col in 0..1) {
-        drawRoundRect(
-            c,
-            topLeft = Offset(g + col * (cell + g), g + r * (cell + g)),
-            size = Size(cell, cell),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(cell * 0.25f),
-        )
-    }
-}
-
 val PlayGlyph: Glyph = { c ->
     val p = androidx.compose.ui.graphics.Path().apply {
         moveTo(size.width * 0.28f, size.height * 0.16f)
@@ -1006,13 +998,3 @@ fun VSpace(h: Dp) = Spacer(Modifier.height(h))
 
 @Composable
 fun HSpace(w: Dp) = Spacer(Modifier.width(w))
-
-/** Column helper that puts [gap] between children. */
-@Composable
-fun Stack(
-    modifier: Modifier = Modifier,
-    gap: Dp = Dimens.gap,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
-) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(gap), content = content)
-}

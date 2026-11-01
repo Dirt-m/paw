@@ -253,7 +253,7 @@ private fun TakeRow(
         VSpace(8.dp)
         if (confirmingDelete) {
             ConfirmRow(
-                prompt = "Delete from disk?",
+                question = "Delete from disk?",
                 confirmLabel = "Delete",
                 onConfirm = {
                     if (controller.deleteRecording(entry)) onDeleted()

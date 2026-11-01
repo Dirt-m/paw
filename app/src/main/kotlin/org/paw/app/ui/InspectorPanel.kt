@@ -339,7 +339,7 @@ private fun RemoveRow(controller: SongController, ui: SongUi, track: Track) {
     Box(Modifier.fillMaxWidth().heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
         if (confirming) {
             ConfirmRow(
-                prompt = "Remove ${track.name}?",
+                question = "Remove ${track.name}?",
                 confirmLabel = "Remove",
                 onConfirm = {
                     controller.removeTrack(track.id)
