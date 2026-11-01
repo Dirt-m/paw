@@ -24,7 +24,7 @@ armed tracks capture on record. Punch-in and punch-out while playing. A count-in
 
 A recording is never lost by editing. Every take lands on disk as an immutable file
 before any edit touches it, and all editing is by reference. The only path that
-removes audio is the user's own confirmed delete on the Recordings screen, which
+removes audio is the user's own confirmed delete in the Takes panel, which
 refuses while any clip still uses the file. A record pass that captured nothing leaves
 no file.
 
@@ -52,7 +52,9 @@ it, move it to the neighbouring track, and give it linear fades at either end. W
 clips overlap, the one added to the track last (a new take, a duplicate, a moved clip)
 is on top and is the only one heard; the older take plays wherever it is uncovered,
 with a short crossfade at each change. Undo and redo cover timeline, mixer and effect
-edits, one entry per gesture. Long-pressing any slider resets it to its default.
+edits, one entry per gesture. Arming, monitoring and switching the loop on or off are
+settings, not edits, and undo leaves them alone; a recording is an undo step. Sliders
+move by the distance the finger travels and a double tap resets one to its default.
 
 ## Song
 
@@ -102,8 +104,8 @@ and deletes like an audio clip; stretching it repeats the pattern. Pattern posit
 are in musical time, so a tempo change keeps pattern clips on their bars. Pattern
 clips play in the song, in the loop and in mixdown.
 
-Samples are played by hand. Each sample on the sampler screen is a tile that sounds
-the moment it is touched, through its track's effects, and two tiles can be hit at
+Samples are played by hand. Each sample in Beats is a pad that sounds
+the moment it is touched, through its track's effects, and two pads can be hit at
 once. Recording those touches into a pattern comes later. Hits are not MIDI and there
 is no MIDI input.
 

@@ -4,152 +4,184 @@ How the app is laid out and why. `docs/scope.md` says what the app does; this fi
 says where each thing lives on the phone and what rule put it there. Read it before
 moving a control.
 
-## The one rule
+## The rules
+
+The song never leaves the screen while music is being made. Everything about a song
+happens on one screen: one mode fills the middle, at most one panel opens over it, and
+the transport stays at the bottom through all of it. Nothing a musician opens stops the
+song, hides the playhead or loses the meters. Only the song list and Settings are
+screens of their own.
 
 Every action has a visible control. Gestures are shortcuts, never the only way.
 
-The rest follows from the phone. The reference device is a Pixel 9a, 411 dp wide in
-portrait. That width holds four small controls beside a track name, so anything beyond arm,
-monitor, mute, solo and a meter moves off the timeline row and onto a screen of
-its own.
+A control means one thing. Track headers hold toggles and nothing that navigates;
+navigation lives in the mode bar and in names you can tap.
 
-## Screens
+Controls sit next to what they change: a sample's level on its row in the kit, a
+track's input on its header, a clip's pattern on the clip's bar.
 
-**Songs.** The list. One primary action, New song, with Settings beside it. Each row
-opens on tap; rename and delete sit behind the row's own menu, and delete asks
-whether the recordings go with the song or stay on disk. A row shows the song in
-miniature (a bar per clip, one line per track, beat tracks in the accent) beside its
-name, track count, length and when it was last changed, so the song you want is found
-by its shape as much as by its name. The manifests are read after the list appears,
-so a slow card never holds the list up.
+The reference phone is a Pixel 9a, 411 by 923 dp, used mostly in portrait. That leaves
+about 866 dp of height under the status bar, and every layout is checked against it
+with real content. Landscape leaves about 360 dp, and every layout works there too.
 
-**Song.** Three bands, top to bottom:
+## The song screen
 
-- Top bar: back to Songs, the song name (in the text colour; the accent is kept for
-  controls), what the engine is listening to (a green DUO
-  or MIC, red LOST when the interface goes away), undo, redo, and a menu with
-  Recordings, Metronome, Sampler, Export mixdown and Settings. Under it, on a phone, the Tracks / Mix tabs.
-- The workspace, either the timeline or the mixer.
-- The transport, at the bottom where the thumb rests: the clock, the tempo, Click and
-  Loop above, then return-to-start, Play/Stop and Rec as the biggest buttons on the screen. A thin
-  master meter runs along the top edge of the transport and turns red at the far right
-  when the mix clips. The tempo shows the BPM over the meter (112 over BPM · 4/4)
-  and opens the metronome, because the tempo is checked before every take and was
-  otherwise two taps deep in a menu.
+Top to bottom in portrait:
 
-When a clip is selected, a row of clip actions (Sample for an audio clip or Edit for a
-pattern clip, then Split, Duplicate, move up or down a track, Delete) appears between the workspace and the transport. It exists only while
-something is selected, so it can never be mistaken for a permanent control.
+- **Top bar.** Back to the song list, the song's name (tap to rename), what the engine
+  hears (a green DUO or MIC, red LOST when the interface goes away; tap for the I/O
+  panel), undo, redo, share (renders the mixdown and opens the share sheet) and a menu
+  with the three rare things: Rename song, Import audio, Settings.
+- **The workspace.** The current mode, or a panel over it.
+- **The mode bar.** Tracks, Mix, Beats, in thumb reach. While a clip is selected the
+  clip's actions take this slot, so nothing above it moves.
+- **The transport.** The clock, the tempo, Click and Loop, then return to start, Play
+  and Rec as the biggest buttons on the screen. A thin master meter runs along its top
+  edge and turns red at the right when the mix clips.
 
-**Tracks (timeline).** Each lane has a header with the track name, an FX button, arm,
-monitor (headphones), mute, solo and a level meter. FX opens the track's screen, and
-so does the rest of the header, so a near miss still lands there. Monitor sits on the
-row rather than on the track screen because it gets switched while playing. Armed tracks show their input source next to the name
-(DUO 1, MIC), which is the moment that information matters. Volume is not in the
-header: at phone width a header fader is 90 dp long and imprecise, and it crowds
-everything else. Under the last lane, one row holds + Track and + Beats side by side,
-so neither drops off the bottom of a full song.
-A beat track's header has Grid where arm and monitor would be, and its lane draws
-pattern clips as their name, a mark per hit and a line where each repeat starts.
+In landscape the mode tabs, or the clip's actions, move into the top bar and the
+transport becomes one row, so the lanes keep their height.
 
-Above the ruler, the overview strip draws the whole song: a thin line per track with
-its clips, the loop, the playhead, and a frame around the part the lanes show. Touch
-or drag anywhere on it and the frame centres there, so any point of a long song is one
-move away at any zoom. In the corner above the track headers, − / Fit / + zoom out,
-show the whole song and zoom in; they are the visible controls for what a pinch does,
-and zooming keeps the playhead where it sits on screen. A song opened for the first
-time is fitted, not shown at a fixed few seconds; an empty one shows twenty seconds.
-After that the zoom is remembered per song.
+A panel covers the whole workspace in portrait and is a 340 dp column on the right in
+landscape, with the mode still working beside it. The mode stays alive under a panel:
+its scroll position, its choices and a looping pattern are there when the panel closes.
+Back closes the panel first, then clears the clip selection, then returns to Tracks,
+and only then leaves the song.
 
-The ruler seeks on tap. The loop region is drawn as a green band with a tab at each
-end; drag a tab to resize it. Hold and drag anywhere on the ruler to paint a new one.
-With no region marked, the Loop button makes one around the selected clip, or around
-the whole song, so Loop never does nothing.
+## Tracks
 
-Clip gestures: tap to select, drag the body of the selected clip to move it, its lower
-edges to trim, its top corners to fade; elsewhere a drag pans and a pinch zooms. The
-selected clip draws what it offers: an accent grip pill straddles each edge on the
-lower half (trim), a green ring sits at the top end of each fade ramp (drag it
-sideways), and the silent wedge under a fade is shaded. When the playhead leaves the
-view, a small arrow chip appears on the lane edge nearest to it; tapping it brings the
-view back and re-engages follow. There is no permanent Follow toggle. The empty
-workspace under the last lane and beside Add track pans and zooms like a lane, since
-in portrait it is the biggest and safest place to swipe.
+The ruler block sits over the lanes. Its corner holds Fit (show the whole song) and
+Snap (Bar, Beat or Off, tap to cycle); − and + zoom around the playhead. Above the
+ruler in portrait, the overview strip draws the whole song with a frame around the part
+on screen; touch or drag it to move there. The ruler counts bars from the song's tempo
+and meter, with beats as ticks when there is room, and minutes and seconds when the
+clock is switched to time. Tap the ruler to seek. The loop is a green band with a tab
+at each end; drag a tab to resize, hold and drag anywhere to paint a new one, and the
+✕ beside it clears it. Loop edges snap.
 
-**Mix.** One channel strip per track, master pinned on the right. The strips exist
-because a phone is tall: a vertical fader gets 500 dp of travel in portrait, which
-makes fine level work possible in a way a header fader never could. Each strip has the
-name and FX (both open the track screen), a long fader beside a meter, the dB
-readout, pan, arm, monitor, mute and solo. The master strip has the fader, meter and mute. Strip width is computed
-so a whole number of strips fills the space beside the master (three on the 9a in
-portrait); the next strip starts exactly at the master's edge, never half visible. In
-landscape the four buttons stack in one column beside the fader and pan runs the
-full width underneath, so the fader keeps its height. In portrait the narrow master
-strip drops its FX button; the name opens the same screen.
+Each lane has a header, 116 dp wide in portrait. The name opens the track's inspector;
+beside it, an audio track shows its input (DUO 1, DUO 1+2, MIC, NO INPUT), which opens
+the inspector at the input list. Under them, four 40 dp toggles: arm, monitor, mute and
+solo, and a level meter down the right edge. A beat track's header has its name, how
+many sounds its kit holds, mute and solo. Tapping anywhere else on a header, or on
+empty lane space, selects the track, which is what Beats, Takes and new samples act on.
+The add row (+ Audio, + Beat, Takes) stays pinned under the lanes.
 
-**Track.** Opened from either view. Level (volume, pan), then Input as a
-single radio list (each connected interface's Input 1, Input 2 and Inputs 1+2, then
-Phone microphone with its boost slider, then No input), then Effects. Effect cards show
-the plugin's controls, an On/Off toggle, reorder arrows when there is more than one,
-and a small Remove. Add effect is a full-width button under the chain; it opens the
-plugin list in place. Remove track is the last thing on the screen and confirms inline.
-Rename is a button in the top bar. Wide windows put level and input beside the chain.
+Clips: tap to select, drag the body to move, the lower edges to trim, the top corners
+to fade. Moving an audio clip snaps the distance it moves, so the take stays in time
+with itself; trims, splits, loop edges and pattern clips snap to the grid. A selected
+beat lane shows a ghost button at the next bar that places the current pattern there.
+Elsewhere a drag pans and a pinch zooms. When the playhead leaves the view, an arrow
+chip on the lane edge brings it back; starting the transport or seeking brings it
+back too.
 
-**Sampler.** Opened from a beat track's Grid button, from Edit on a selected pattern
-clip, or from the song menu. The top bar names the beat track and has Play/Stop, which
-loops the pattern on its own. Under it, the song's patterns as a row of chips with New
-and Copy, then the pattern's time signature (beat count and unit), its bars and steps
-per beat, and its groupings when there is more than one. Then the grid: the samples
-down the left as tiles, which sound on touch down and take one finger each, and a row
-of steps beside each, tapped on and off. Rows and steps grow into the space the
-screen has spare (rows up to 104 dp, steps up to 56 dp), so a small kit gets big pads
-instead of a strip of small ones above an empty screen. Groups are shaded in turn and bars carry the
-strongest line. Place at playhead runs along the bottom. In landscape the pattern
-controls move to a column on the left so the grid keeps its height.
+Where audio clips overlap on a track, the newest is on top and the only one heard. The
+clip's bar lists the takes under it and brings any of them back to the top.
 
-**Master.** The same screen with Output (Automatic, showing what it resolves to, then
-every connected playback endpoint) where Input would be, and no pan.
+The clip bar starts with ✕ to deselect. An audio clip offers Split, Duplicate and
+Delete; a pattern clip offers its pattern (swap, or a new variation for this clip
+only), how many times it repeats (− and +) and Edit, which opens Beats on it. More
+shows the rest in the same row: Sample to kit, Loop clip, move up or down a track, and
+Takes when there are takes underneath.
 
-**Recordings.** Every recording in the song, grouped by track, newest first, with
-imported files in their own group. A row is a length, a date, and whether it is on
-the timeline; file names stay on disk. Import in the top bar opens Android's file
-picker, where a recorder plugged in as USB storage shows up as a drive. Play
-auditions, Add puts it on a track at the playhead, and ✕ (only on unused recordings)
-deletes from disk after a confirmation.
+The clock reads bars and beats (3.2 with the hundredths small beside it); tap it to
+read minutes and seconds, and the ruler follows. During a count-in it shows the beats
+left. The tempo button shows the tempo over the meter and opens the Tempo panel.
 
-**Settings.** Only what applies to every song, reachable from the song list and from a
-song's menu. Segmented controls, one per row: keep awake, follow style, peak hold.
-With a song open, a read-only Audio block (input, output, latency compensation). Then
-the songs folder and the effects folder.
+## Mix
 
-**Metronome.** Per song, from the song menu: click, count-in, tempo (stepper plus
-slider) and beats per bar. The phone mic boost is per song too, under Phone
-microphone on the track screen.
+One strip per track, the master pinned on the right, widths computed so a whole number
+of strips fills the space (three and the master in portrait). In portrait a row of
+track chips above the strips shows every track, outlines the ones on screen and scrolls
+there on a tap; + Audio and + Beat end it. A strip has the name (opens the inspector),
+an FX button with the effect count (opens the inspector on its effects), a long fader
+beside a meter, the dB value, pan, and mute and solo. Arm and monitor are not here:
+they live on the lanes and in the inspector. In landscape mute and solo stack beside the
+fader so it keeps its height.
+
+Faders and sliders move by the distance the finger travels, from wherever they are, so
+grabbing one never makes it jump. A double tap on a slider or on its value resets it.
+
+## Beats
+
+Beats works on one beat track at a time, chosen from the chips along the top (+ Beat
+track adds one; nothing is created by opening the mode). Under them, the pattern (tap
+for the list: New, Copy, Rename, Delete, refused while the pattern is placed), its meter
+(7/8 · 2+2+3 · 1 bar, tap for the meter panel), ▶ to loop the pattern on its own, and
+Place at bar n.
+
+In portrait Steps and Pads are two views, because one surface cannot hold a normal kit.
+Steps is the grid: a row per sound, a cell per step, groups shaded and beats numbered,
+filling the width. Tapping a sound's name plays it and never touches a step. The Kit
+toggle turns each row into the sound's name (tap to rename), its level, ▶ and ✕, so a
+kit is balanced where it is programmed. Pads shows the kit as large pads that sound the
+moment they are touched, one finger each. In landscape the pads sit on the left and the
+grid on the right.
+
+The transport's Play always plays the song, and stops a pattern loop.
+
+## Panels
+
+**Inspector.** A track's name with ‹ and › to step through the tracks and the master,
+a level bar, then Track and FX tabs beside mute, solo and monitor. Track: volume, pan,
+the input list (each interface's inputs, the phone microphone, no input; the mic links
+to its boost), rename, and Remove track last, confirmed in place. A beat track has Open
+in Beats instead of inputs. The master has volume, mute and its output. FX: the effect
+chain as cards with On, every control, wet and dry, reorder and Remove, then Add effect,
+which lists every effect in place.
+
+**Takes.** Every recording in the song, grouped by track, newest first, imported files
+in their own group, each with its waveform, length and date. Play auditions; Add puts it
+on a chosen track at the playhead, or at its original time when that is known; a take on
+the timeline says where and goes there on a tap; ✕ deletes an unused take from disk
+after a confirmation, never while a take is being recorded. Import opens Android's file
+picker.
+
+**Tempo.** The tempo large, with − and +, a slider and Tap. Beats per bar, the beat
+unit (4 or 8), count-in and click.
+
+**I/O.** The input in use, the phone mic boost, the output list (Automatic and every
+connected endpoint), the latency, and a warning when the output is Bluetooth.
+
+**Sample to kit.** From a selected audio clip: a name, which beat track to put it on
+(or a new one), and Make sample, which opens Beats on that kit.
+
+**Meter.** A pattern's beats, beat unit, grouping, bars and steps per beat.
+
+## Songs and Settings
+
+**Songs.** The list. New song makes a song and opens it at once, named after the moment
+("Idea 1 Nov, 14.05"), with one track armed when an interface is connected. Each row
+shows the song in miniature beside its name, track count, length and when it changed;
+its ⋮ opens Rename and Delete in the row, and delete asks whether the recordings go
+with the song.
+
+**Settings.** Only what applies to every song: keep awake, follow style, peak hold, a
+read only Audio block, the songs folder and the effects folder.
 
 ## Conventions
 
-- Touch targets are 40 dp or more; transport buttons are 52 dp.
-- Controls are rounded (6 dp) so they read as pressable; surfaces (lanes, panels,
-  lists) are square so they read as workspace.
-- Lilac is the accent and means "this is the primary thing here": the selected tab,
-  the primary button, the selected clip, the playhead, pattern hits. It is kept clear
-  of the two state colours. Red means recording or clipping. Green means an active mode (solo, loop, an input that is open).
+- Touch targets are 40 dp or more; the transport's buttons are 52 dp.
+- Controls are rounded (6 dp) so they read as pressable; surfaces are square so they
+  read as workspace.
+- Lilac is the accent: the selected thing and the primary action. Green means an
+  active mode (solo, loop, click, monitoring, an open input). Red means recording,
+  clipping or removal. Yellow means mute and warnings.
 - Words are set in the system sans; numbers that change under the eye (the clock, dB,
   times) are monospace so they do not jitter.
-- Destructive actions (remove track, delete recording, delete song) confirm inline,
-  never in a dialog, and never sit at the top of a screen.
-- No explainer text. A control's label is its whole explanation; if that is not
-  enough, the control is wrong.
+- Panels, pickers and confirmations are drawn in the layout, never as popups.
+- No explainer text. A control's label is its whole explanation; an empty state may say
+  in one line how to fill it.
 
 ## Layout rules
 
-`COMPACT_WIDTH` (640 dp) decides whether panels stack; `SHORT_HEIGHT` (520 dp) decides
-whether the transport collapses to one row and the lanes shrink. A phone is compact in
-portrait and short in landscape. Lanes grow to fill the viewport up to 128 dp and never
-go below 84 dp (72 dp when short), after which the list scrolls.
+`COMPACT_WIDTH` (640 dp) decides whether a panel covers the workspace or sits beside
+it; `SHORT_HEIGHT` (520 dp) decides whether the mode tabs and clip actions move into
+the top bar and the transport collapses to one row. A phone is compact in portrait and
+short in landscape.
 
 ## Verifying
 
-`tools/snapshots.sh` renders every screen, both orientations, at Pixel 9a size to
-`app/snapshots/`. It covers layout and state; it does not cover gesture feel, which
-needs the phone.
+`tools/snapshots.sh` renders every mode, panel and state in both orientations at Pixel
+9a size to `app/snapshots/`. The snapshot tests live in one file per area on a shared
+harness. They cover layout and state; touch feel needs the phone.

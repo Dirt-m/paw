@@ -17,7 +17,7 @@ Deleting a clip only drops the reference, and undo restores it. Two deliberate
 exceptions. A record pass that captured zero frames leaves a header-only file, which
 is deleted when the pass finalizes; the startup sweep for leftovers also requires the
 file to be unreferenced and exactly header-sized, so a corrupt real take can never be
-caught by it. And the user can delete a recording from disk on the Recordings screen,
+caught by it. And the user can delete a recording from disk in the Takes panel,
 behind a confirmation, refused while any clip still uses it.
 
 Both orientations. Layouts adapt in place. Rotation must not recreate the activity or
@@ -75,7 +75,7 @@ uses what its open streams report, learned on first use and remembered per route
 Bluetooth runs 150 to 300 ms against USB's 10, so one global constant would drop a
 Bluetooth overdub a fifth of a second late.
 
-I/O is device-aware. A track's input is a (device, channel) pair; the track screen
+I/O is device-aware. A track's input is a (device, channel) pair; the inspector
 lists every connected interface with its channels plus the phone mic, and the engine's
 single input stream follows whichever device the armed tracks reference. Output is a
 list on the master screen: Automatic plus every connected playback endpoint

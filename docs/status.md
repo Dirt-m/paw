@@ -69,10 +69,19 @@ pressed them on the device. In rough order of risk:
     from there, and the move of existing songs out of the private folder.
 14. Panning and pinching in the empty space under the lanes, and the new header
     buttons (monitor, FX) under the finger.
-15. The overview strip under the finger (touch and drag to move the view, while
-    playing too), the − / Fit / + zoom buttons, the fit on a song's first open, the
-    tempo button, the song list thumbnails read from real manifests, and the sampler
-    grid's larger pads. All of it is checked only in the snapshots.
+15. The song screen as a whole: modes, panels over them, back order, and the mode
+    staying alive under a panel. Snapshots cover layout only.
+16. Snap while dragging clips, trims and loop edges (nothing may jump on release),
+    the bar ruler and clock at 7/8, and the beat unit's click and count-in on the Duo.
+17. Faders and sliders that move by the finger's travel and reset on a double tap,
+    in the mixer, the inspector and the kit rows.
+18. Beats: pad latency in a mode instead of a screen, two fingers at once, live kit
+    levels while a pattern loops, Place at bar, pattern variations on a clip.
+19. Newest take on top: a punch in over an old take plays only the new one, with no
+    click at the boundaries, live and in a mixdown; bringing an older take back.
+20. Takes panel audition, add to a chosen track, at original time; the Tempo panel's
+    tap tempo; the I/O panel's output switch and Bluetooth warning; one tap New song
+    arming on the Duo.
 
 ## Known issues
 
@@ -84,9 +93,9 @@ pressed them on the device. In rough order of risk:
 - Chain reorder rebuilds the chain, so reverb tails and delay lines reset. Bypassed
   units freeze their state and resume stale.
 - Count-in only applies when recording from stop; punch-ins are live.
-- Take audition on the Recordings screen uses MediaPlayer on whatever route Android
+- Take audition in the Takes panel uses MediaPlayer on whatever route Android
   picks; with the engine holding an exclusive USB stream this path is unverified.
-- The Recordings screen reads WAV headers per file on open. Fine at tens of takes,
+- The Takes panel reads WAV headers per file on open. Fine at tens of takes,
   revisit at hundreds.
 - Fades crossing a split point clamp rather than translate; the split invariant only
   holds exactly for fade-free cut points.
@@ -114,10 +123,14 @@ pressed them on the device. In rough order of risk:
   `EffectCatalog.kt`, `TakeImport.kt` (WAV parsing, resampling, platform decoding).
 - `Engine.kt` (JNI), `AudioDevices.kt` (endpoint enumeration), `AppPrefs.kt`,
   `Latency.kt`, `MainActivity.kt` (navigation, permissions, stream lifecycle).
-- `ui/`: `SongScreen.kt` (top bar, tracks view, selection row, transport),
-  `Timeline.kt` (view window, overview, ruler, lanes, waveforms), `MixerView.kt`,
-  `TrackDetailScreen.kt`, `RecordingsScreen.kt`, `OptionsScreen.kt`, `MetronomeScreen.kt`, `SamplerScreen.kt`,
-  `ProjectListScreen.kt`, `Widgets.kt`, `Theme.kt`.
+- `ui/`: `SongScreen.kt` (the shell: top bar, mode bar, panel placement, back order)
+  and `SongUi.kt` (mode, panel and view state); Tracks in `TracksView.kt`,
+  `Timeline.kt` (view window, overview, ruler, lanes, waveforms), `ClipBar.kt` and
+  `Transport.kt`; Mix in `MixerView.kt`; Beats in `BeatsMode.kt`, `BeatsSteps.kt`,
+  `BeatsPads.kt`, `BeatsPatterns.kt`; the panels in `PanelHost.kt`,
+  `InspectorPanel.kt`, `InspectorFx.kt`, `TakesPanel.kt`, `TempoPanel.kt`,
+  `IoPanel.kt`, `SampleToKitPanel.kt`, `MeterPanel.kt`; `ProjectListScreen.kt`,
+  `OptionsScreen.kt`, `Widgets.kt` (controls and drawn glyphs), `Theme.kt`.
 - `app/src/test/kotlin/.../snap/`: the JVM snapshot harness (`ShadowEngine`,
-  `Fixtures`, `ScreenSnapshots`). `app/src/test/kotlin/.../ui/WaveLinesTest.kt`.
+  `Fixtures`, `SnapshotBase`, and one snapshot file per area). `app/src/test/kotlin/.../ui/WaveLinesTest.kt`.
 - `tools/`: `snapshots.sh`, `engine_sanity.cpp`, `effects_sanity.cpp`.
