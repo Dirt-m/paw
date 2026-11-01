@@ -48,9 +48,11 @@ Output is chosen on the master screen: automatic, or any connected playback endp
 ## Editing
 
 All non-destructive: drag a clip, trim its edges, split it at the playhead, duplicate
-it, move it to the neighbouring track, and give it linear fades at either end. Undo
-and redo cover timeline, mixer and effect edits, one entry per gesture. Long-pressing
-any slider resets it to its default.
+it, move it to the neighbouring track, and give it linear fades at either end. Where
+clips overlap, the one added to the track last (a new take, a duplicate, a moved clip)
+is on top and is the only one heard; the older take plays wherever it is uncovered,
+with a short crossfade at each change. Undo and redo cover timeline, mixer and effect
+edits, one entry per gesture. Long-pressing any slider resets it to its default.
 
 ## Song
 
