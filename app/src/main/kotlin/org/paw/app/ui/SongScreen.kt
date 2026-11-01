@@ -88,6 +88,7 @@ fun SongScreen(
     onOpenTakes: () -> Unit,
     onOpenOptions: () -> Unit,
     onOpenMetronome: () -> Unit,
+    onOpenSampler: () -> Unit = {},
     initialView: SongView = SongView.Tracks,
 ) {
     val context = LocalContext.current
@@ -153,7 +154,7 @@ fun SongScreen(
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             SongTopBar(
                 controller, view, onView = { view = it }, onBack, onOpenTrack,
-                onOpenTakes, onOpenOptions, onOpenMetronome, compact = compact,
+                onOpenTakes, onOpenOptions, onOpenMetronome, onOpenSampler, compact = compact,
             )
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -183,6 +184,7 @@ private fun SongTopBar(
     onOpenTakes: () -> Unit,
     onOpenOptions: () -> Unit,
     onOpenMetronome: () -> Unit,
+    onOpenSampler: () -> Unit,
     compact: Boolean,
 ) {
     val song = controller.song
@@ -217,6 +219,10 @@ private fun SongTopBar(
                 DropdownMenuItem(
                     text = { Text("Metronome", style = BodyStyle) },
                     onClick = { menuOpen = false; onOpenMetronome() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Sampler", style = BodyStyle) },
+                    onClick = { menuOpen = false; onOpenSampler() },
                 )
                 DropdownMenuItem(
                     text = {

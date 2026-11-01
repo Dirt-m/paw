@@ -430,6 +430,21 @@ class ScreenSnapshots {
         snap("metronome-landscape")
     }
 
+    @Test
+    fun sampler_portrait() {
+        val c = controller()
+        content { org.paw.app.ui.SamplerScreen(controller = c, onBack = {}) }
+        snap("sampler-portrait")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun sampler_landscape() {
+        val c = controller()
+        content { org.paw.app.ui.SamplerScreen(controller = c, onBack = {}) }
+        snap("sampler-landscape")
+    }
+
     /** Playhead far ahead of the view: the playhead chip on the right edge. */
     @Test
     fun song_playhead_offscreen_portrait() {

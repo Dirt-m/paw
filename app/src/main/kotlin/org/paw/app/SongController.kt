@@ -96,6 +96,9 @@ class SongController(
     private companion object {
         /** Process-wide monotonic song generation; 0 is "no song open". */
         val songGenerations = AtomicLong(0)
+
+        /** Longest slice a sample holds in memory: 10 s, about 3.8 MB. */
+        const val MAX_SAMPLE_FRAMES = 10L * SAMPLE_RATE
     }
 
     private val gen: Long = songGenerations.incrementAndGet()
@@ -949,6 +952,39 @@ class SongController(
             peaks
         }
     }
+
+    // ---- sampler ----
+
+    /** One playable sound: which track it plays through, and what to call it. */
+    data class SampleTile(val trackId: Int, val label: String)
+
+    var sampleTiles: List<SampleTile> by mutableStateOf(emptyList())
+        private set
+
+    /**
+     * Until samples have tracks of their own, every clip on the timeline is a
+     * sample: a clip already is a slice of a take, and it plays through its
+     * track's effects. Slices are capped so a long take can't fill memory.
+     */
+    fun loadClipSamples() {
+        val scope = scope ?: return
+        val clips = song.tracks.flatMap { t -> t.clips.sortedBy { it.start }.mapIndexed { i, c -> Triple(t, i, c) } }
+        scope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                Engine.setSamples(
+                    gen,
+                    IntArray(clips.size) { clips[it].first.id },
+                    Array(clips.size) { absPath(clips[it].third.take) },
+                    LongArray(clips.size) { clips[it].third.srcStart },
+                    LongArray(clips.size) { clips[it].third.length.coerceAtMost(MAX_SAMPLE_FRAMES) },
+                )
+            }
+            sampleTiles = clips.map { (t, i, _) -> SampleTile(t.id, "${t.name} ${i + 1}") }
+            if (loaded < clips.size) message = "${clips.size - loaded} of ${clips.size} samples could not be read"
+        }
+    }
+
+    fun triggerSample(index: Int) = Engine.triggerSample(index, 1f)
 
     // ---- import ----
 

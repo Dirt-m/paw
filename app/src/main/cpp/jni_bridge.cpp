@@ -153,6 +153,36 @@ JNIEXPORT void JNICALL Java_org_paw_app_Engine_setLoop(
     AudioEngine::instance().setLoop(gen, enabled, startFrame, endFrame);
 }
 
+// Reads every slice here, on the caller's thread, before the engine takes its
+// lock. A slice that fails to load stays in the bank as silence so the
+// indices the UI triggers by still line up. Returns how many loaded.
+JNIEXPORT jint JNICALL Java_org_paw_app_Engine_setSamples(
+        JNIEnv* env, jobject, jlong gen, jintArray trackIds, jobjectArray paths,
+        jlongArray srcStarts, jlongArray lengths) {
+    const std::vector<std::string> p = toStringVector(env, paths);
+    const std::vector<int64_t> ss = toLongVector(env, srcStarts);
+    const std::vector<int64_t> ln = toLongVector(env, lengths);
+    std::vector<jint> ids(trackIds ? env->GetArrayLength(trackIds) : 0);
+    if (!ids.empty()) env->GetIntArrayRegion(trackIds, 0, ids.size(), ids.data());
+    const size_t n = std::min(std::min(p.size(), ids.size()), std::min(ss.size(), ln.size()));
+
+    auto bank = std::make_unique<SampleBank>();
+    bank->samples.resize(n);
+    jint loaded = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bank->samples[i].trackId = ids[i];
+        std::string err;
+        if (loadSampleSlice(p[i], ss[i], ln[i], bank->samples[i], err)) ++loaded;
+    }
+    AudioEngine::instance().setSamples(gen, std::move(bank));
+    return loaded;
+}
+
+JNIEXPORT void JNICALL Java_org_paw_app_Engine_triggerSample(JNIEnv*, jobject, jint index,
+                                                                 jfloat velocity) {
+    AudioEngine::instance().triggerSample(index, velocity);
+}
+
 JNIEXPORT void JNICALL Java_org_paw_app_Engine_removeTrack(JNIEnv*, jobject, jlong gen,
                                                                jint trackId) {
     AudioEngine::instance().removeTrack(gen, trackId);

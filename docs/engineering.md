@@ -189,8 +189,9 @@ replaces the JNI engine with deterministic fakes; keep its effect catalog in ste
 `BuiltinEffects.cpp`.
 
 Host-side C++ checks live in `tools/`: `engine_sanity.cpp` (WAV round trips, timeline
-placement, mixdown) and `effects_sanity.cpp` (DSP behaviour per effect). The build line
-for each is in its header. Run them after touching the pure C++ layers.
+placement, mixdown), `effects_sanity.cpp` (DSP behaviour per effect) and
+`sampler_sanity.cpp` (slice loading, the voice pool). The build line for each is in
+its header. Run them after touching the pure C++ layers.
 
 `WaveLinesTest` pins the waveform column arithmetic for trimmed clips. `TakeImportTest`
 covers the WAV import paths (bit exact copies, extensible headers, odd chunks, the

@@ -35,6 +35,7 @@ import org.paw.app.ui.OptionsScreen
 import org.paw.app.ui.ProjectListScreen
 import org.paw.app.ui.SongScreen
 import org.paw.app.ui.RecordingsScreen
+import org.paw.app.ui.SamplerScreen
 import org.paw.app.ui.TrackDetailScreen
 
 private sealed interface Nav {
@@ -43,6 +44,7 @@ private sealed interface Nav {
     data class TrackDetail(val trackId: Int) : Nav
     data object Takes : Nav
     data object Metronome : Nav
+    data object Sampler : Nav
 
     /** Settings, opened from the song list or from inside a song. */
     data class Options(val fromSong: Boolean) : Nav
@@ -278,6 +280,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenTakes = { nav = Nav.Takes },
                                 onOpenOptions = { nav = Nav.Options(fromSong = true) },
                                 onOpenMetronome = { nav = Nav.Metronome },
+                                onOpenSampler = { nav = Nav.Sampler },
                             )
                         }
                     }
@@ -309,6 +312,16 @@ class MainActivity : ComponentActivity() {
                         } else {
                             BackHandler { nav = Nav.Song }
                             MetronomeScreen(c, onBack = { nav = Nav.Song })
+                        }
+                    }
+
+                    Nav.Sampler -> {
+                        val c = controller
+                        if (c == null) {
+                            nav = Nav.Projects
+                        } else {
+                            BackHandler { nav = Nav.Song }
+                            SamplerScreen(c, onBack = { nav = Nav.Song })
                         }
                     }
 

@@ -135,6 +135,14 @@ class ShadowEngine {
     }
 
     @Implementation
+    fun setSamples(gen: Long, trackIds: IntArray, paths: Array<String>, srcStarts: LongArray, lengths: LongArray): Int =
+        paths.size
+
+    @Implementation
+    fun triggerSample(index: Int, velocity: Float) {
+    }
+
+    @Implementation
     fun setLoop(gen: Long, enabled: Boolean, startFrame: Long, endFrame: Long) {
     }
 

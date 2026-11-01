@@ -72,6 +72,24 @@ object Engine {
         monitor: Boolean,
     )
 
+    // ---- sampler ----
+
+    /** Reads each take slice into memory and installs them as the song's
+     *  samples, replacing the previous set. Blocks on file I/O: call it off
+     *  the main thread. A slice that fails stays silent so indices line up.
+     *  Returns how many loaded. */
+    external fun setSamples(
+        gen: Long,
+        trackIds: IntArray,
+        paths: Array<String>,
+        srcStarts: LongArray,
+        lengths: LongArray,
+    ): Int
+
+    /** Plays sample [index] on the next audio burst. Main thread only: the
+     *  engine's trigger queue has a single producer. */
+    external fun triggerSample(index: Int, velocity: Float)
+
     // ---- transport ----
     //
     // Intent in, outcome out: the engine decides under its own lock, so no

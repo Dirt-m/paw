@@ -23,7 +23,7 @@ whether the recordings go with the song or stay on disk.
 
 - Top bar: back to Songs, the song name, what the engine is listening to (a green DUO
   or MIC, red LOST when the interface goes away), undo, redo, and a menu with
-  Recordings, Metronome, Export mixdown and Settings. Under it, on a phone, the Tracks / Mix tabs.
+  Recordings, Metronome, Sampler, Export mixdown and Settings. Under it, on a phone, the Tracks / Mix tabs.
 - The workspace, either the timeline or the mixer.
 - The transport, at the bottom where the thumb rests: the clock, Click and Loop above,
   then return-to-start, Play/Stop and Rec as the biggest buttons on the screen. A thin
@@ -75,6 +75,11 @@ the plugin's controls, an On/Off toggle, reorder arrows when there is more than 
 and a small Remove. Add effect is a full-width button under the chain; it opens the
 plugin list in place. Remove track is the last thing on the screen and confirms inline.
 Rename is a button in the top bar. Wide windows put level and input beside the chain.
+
+**Sampler.** A grid of large tiles, one per sample, about three across a portrait
+phone, with Play/Stop in the top bar so samples can be played against the song. A tile
+fires on touch down, not on release, and each tile takes its own finger. It lights
+while held. For now every clip on the timeline is a sample, named after its track.
 
 **Master.** The same screen with Output (Automatic, showing what it resolves to, then
 every connected playback endpoint) where Input would be, and no pan.
