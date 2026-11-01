@@ -30,13 +30,10 @@ import kotlinx.coroutines.Dispatchers
 import org.paw.app.model.InputDevice
 import org.paw.app.model.InputOption
 import org.paw.app.model.ProjectStore
-import org.paw.app.ui.MetronomeScreen
 import org.paw.app.ui.OptionsScreen
 import org.paw.app.ui.ProjectListScreen
 import org.paw.app.ui.SongScreen
-import org.paw.app.ui.RecordingsScreen
 import org.paw.app.ui.SamplerScreen
-import org.paw.app.ui.TrackDetailScreen
 
 private sealed interface Nav {
     data object Projects : Nav
