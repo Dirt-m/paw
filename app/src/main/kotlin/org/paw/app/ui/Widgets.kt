@@ -987,10 +987,9 @@ fun PanelHeader(
             style = TitleStyle.copy(fontSize = 17.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 6.dp),
+            modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
         )
         if (onNext != null) IconButton(ChevronRightGlyph, onClick = onNext)
-        Spacer(Modifier.weight(1f))
         actions()
         IconButton(CloseGlyph, onClick = onClose)
     }
