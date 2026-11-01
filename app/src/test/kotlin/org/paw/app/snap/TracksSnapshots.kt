@@ -1,9 +1,10 @@
 package org.paw.app.snap
 
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import org.junit.Test
-import org.paw.app.ui.InspectorTab
-import org.paw.app.ui.SongMode
-import org.paw.app.ui.SongPanel
+import org.paw.app.SongController
 import org.paw.app.ui.SongUi
 import org.robolectric.annotation.Config
 
@@ -18,20 +19,89 @@ class TracksSnapshots : SnapshotBase() {
 
     /** Guitar's first clip selected: the clip bar in the mode bar's place. */
     @Test fun song_selected_portrait() {
-        val c = controller(); c.selectedClip = 1 to 1
+        val c = controller(); c.selectedClip = 1 to 1; c.selectedTrack = 1
         songWith(c); snap("song-selected-portrait")
     }
 
     @Test @Config(qualifiers = "+land")
     fun song_selected_landscape() {
-        val c = controller(); c.selectedClip = 1 to 1
+        val c = controller(); c.selectedClip = 1 to 1; c.selectedTrack = 1
         songWith(c); snap("song-selected-landscape")
     }
 
     /** The beat track's pattern clip selected. */
     @Test fun song_pattern_selected_portrait() {
-        val c = controller(); c.selectedClip = 5 to 5
+        val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
         songWith(c); snap("song-pattern-selected-portrait")
+    }
+
+    @Test @Config(qualifiers = "+land")
+    fun song_pattern_selected_landscape() {
+        val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
+        songWith(c); snap("song-pattern-selected-landscape")
+    }
+
+    /** The pattern chooser swapped into the clip bar. */
+    @Test fun song_pattern_chooser_portrait() {
+        val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
+        songWith(c)
+        compose.onNodeWithText("Groove ▾").performClick()
+        snap("song-pattern-chooser-portrait")
+    }
+
+    /** More on an audio clip: the bar wraps to a second row. */
+    @Test fun song_clip_more_portrait() {
+        val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
+        songWith(c)
+        compose.onNodeWithContentDescription("More").performClick()
+        snap("song-clip-more-portrait")
+    }
+
+    @Test fun song_pattern_more_portrait() {
+        val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
+        songWith(c)
+        compose.onNodeWithContentDescription("More").performClick()
+        snap("song-pattern-more-portrait")
+    }
+
+    @Test @Config(qualifiers = "+land")
+    fun song_clip_more_landscape() {
+        val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
+        songWith(c)
+        compose.onNodeWithContentDescription("More").performClick()
+        snap("song-clip-more-landscape")
+    }
+
+    /** The older takes under a newer one, from More. */
+    @Test fun song_clip_takes_portrait() {
+        val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
+        songWith(c)
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Takes 2").performClick()
+        snap("song-clip-takes-portrait")
+    }
+
+    @Test @Config(qualifiers = "+land")
+    fun song_clip_takes_landscape() {
+        val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
+        songWith(c)
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Takes 2").performClick()
+        snap("song-clip-takes-landscape")
+    }
+
+    /** The beat lane selected with nothing on it: the ghost offers the pattern. */
+    @Test fun song_beat_lane_ghost_portrait() {
+        val c = demoController(app) { ShadowEngine.playheadFrame = 48000L * 11 }
+        c.selectedTrack = 5
+        songWith(c); snap("song-beat-ghost-portrait")
+    }
+
+    @Test @Config(qualifiers = "+land")
+    fun song_beat_lane_ghost_landscape() {
+        val c = demoController(app) { ShadowEngine.playheadFrame = 48000L * 11 }
+        c.selectedTrack = 5
+        songWith(c); snap("song-beat-ghost-landscape")
     }
 
     private fun recordingController() = demoController(app) {
@@ -50,6 +120,9 @@ class TracksSnapshots : SnapshotBase() {
 
     @Test fun song_empty_portrait() { songWith(emptyController(app)); snap("song-empty-portrait") }
 
+    @Test @Config(qualifiers = "+land")
+    fun song_empty_landscape() { songWith(emptyController(app)); snap("song-empty-landscape") }
+
     @Test fun song_message_portrait() {
         val c = controller(); c.message = "Recording dropped 480 frames"
         songWith(c); snap("song-message-portrait")
@@ -63,5 +136,38 @@ class TracksSnapshots : SnapshotBase() {
     @Test fun song_playhead_offscreen_portrait() {
         val c = demoController(app) { ShadowEngine.playheadFrame = 48000L * 40 }
         songWith(c); snap("song-playhead-offscreen-portrait")
+    }
+
+    /** The clock and the ruler in minutes and seconds. */
+    @Test fun song_clock_time_portrait() {
+        val c = demoController(app) { ShadowEngine.playheadFrame = (48000L * 6.4).toLong() }
+        songWith(c, SongUi().apply { clockAsTime = true }); snap("song-clock-time-portrait")
+    }
+
+    /** A 7/8 song: bars of seven eighths on the ruler, the grid and the clock. */
+    @Test fun song_seven_eight_portrait() {
+        val c = demoController(app) { ShadowEngine.playheadFrame = (48000L * 6.4).toLong() }
+        c.setMeter(7, 8)
+        songWith(c); snap("song-seven-eight-portrait")
+    }
+
+    /** Zoomed in close enough for the ruler to number the beats. */
+    @Test fun song_zoomed_in_portrait() {
+        val c = demoController(app) { ShadowEngine.playheadFrame = (48000L * 2.2).toLong() }
+        songWith(c)
+        repeat(4) { compose.onNodeWithText("+").performClick() }
+        snap("song-zoomed-in-portrait")
+    }
+
+    /**
+     * The demo song with Guitar's first take recorded over twice: two newer
+     * clips stacked on clip 1, the newest selected.
+     */
+    private fun stackedController(): SongController {
+        val c = controller()
+        val take = c.song.track(1)!!.clips.first().take
+        c.addTakeToTrack(1, take, 24000L)
+        c.addTakeToTrack(1, take, 48000L)
+        return c
     }
 }

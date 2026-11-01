@@ -3,6 +3,16 @@ package org.paw.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -15,6 +25,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -33,6 +44,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.withTimeoutOrNull
@@ -40,7 +53,13 @@ import org.paw.app.PeakData
 import org.paw.app.SongController
 import org.paw.app.TRANSPORT_STOPPED
 import org.paw.app.model.Clip
+import org.paw.app.model.SnapGrid
 import org.paw.app.model.Song
+import org.paw.app.model.barStartFrame
+import org.paw.app.model.framesPerBar
+import org.paw.app.model.framesPerSongBeat
+import org.paw.app.model.snapDelta
+import org.paw.app.model.snapFrame
 import org.paw.app.model.Track
 import org.paw.app.model.movedTo
 import org.paw.app.model.trimmedLeft
@@ -169,180 +188,256 @@ private sealed interface RulerMode {
 }
 
 /**
- * Time ruler over the lanes. Tap seeks, drag pans, pinch zooms. Drag a loop
- * handle to resize the region, or hold anywhere and drag to paint a new one.
+ * The ruler over the lanes, in bars (or seconds when the clock reads time).
+ * Tap seeks, drag pans, pinch zooms. Drag a loop tab to move that edge, or
+ * hold anywhere and drag to paint a new region; both land on the snap grid.
+ * The ✕ beside the right tab clears the region.
  */
 @Composable
 fun Ruler(
     tl: TimelineState,
     controller: SongController,
+    ui: SongUi,
     modifier: Modifier = Modifier,
 ) {
     val measurer = rememberTextMeasurer(cacheSize = 64)
     val song = controller.song
-    val sr = song.sampleRate
-    val labels = remember { HashMap<Long, TextLayoutResult>() }
+    val labels = remember { HashMap<String, TextLayoutResult>() }
     val density = LocalDensity.current
     val edgeGrabPx = with(density) { 22.dp.toPx() }
     // Loop-drag preview; committed on release.
     var loopDrag by remember { mutableStateOf<Pair<Long, Long>?>(null) }
 
-    Canvas(
-        modifier
-            .clipToBounds()
-            .background(Colors.panel)
-            .pointerInput(tl) {
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    val slop = viewConfiguration.touchSlop
-                    val longPressMs = viewConfiguration.longPressTimeoutMillis
-                    var acc = Offset.Zero
-                    var mode: RulerMode = RulerMode.Undecided
-                    val s = controller.song
-                    val hasRegion = s.loopEnd > s.loopStart
-                    // A finger landing on a loop edge grabs it straight away.
-                    if (hasRegion) {
-                        val xl = tl.pxOf(s.loopStart)
-                        val xr = tl.pxOf(s.loopEnd)
-                        val dl = kotlin.math.abs(down.position.x - xl)
-                        val dr = kotlin.math.abs(down.position.x - xr)
-                        if (dl < edgeGrabPx && dl <= dr) {
-                            mode = RulerMode.Edge(left = true, otherEdge = s.loopEnd)
-                            loopDrag = s.loopStart to s.loopEnd
-                        } else if (dr < edgeGrabPx) {
-                            mode = RulerMode.Edge(left = false, otherEdge = s.loopStart)
-                            loopDrag = s.loopStart to s.loopEnd
+    BoxWithConstraints(modifier.clipToBounds()) {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .background(Colors.panel)
+                .pointerInput(tl) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val slop = viewConfiguration.touchSlop
+                        val longPressMs = viewConfiguration.longPressTimeoutMillis
+                        var acc = Offset.Zero
+                        var mode: RulerMode = RulerMode.Undecided
+                        val s = controller.song
+                        fun snapped(x: Float) = s.snapFrame(tl.frameAt(x).coerceAtLeast(0), ui.snap)
+                        val hasRegion = s.loopEnd > s.loopStart
+                        // A finger landing on a loop edge grabs it straight away.
+                        if (hasRegion) {
+                            val dl = kotlin.math.abs(down.position.x - tl.pxOf(s.loopStart))
+                            val dr = kotlin.math.abs(down.position.x - tl.pxOf(s.loopEnd))
+                            if (dl < edgeGrabPx && dl <= dr) {
+                                mode = RulerMode.Edge(left = true, otherEdge = s.loopEnd)
+                                loopDrag = s.loopStart to s.loopEnd
+                            } else if (dr < edgeGrabPx) {
+                                mode = RulerMode.Edge(left = false, otherEdge = s.loopStart)
+                                loopDrag = s.loopStart to s.loopEnd
+                            }
                         }
-                    }
-                    val pressStart = down.uptimeMillis
+                        val pressStart = down.uptimeMillis
 
-                    while (true) {
-                        // Undecided fingers race the long-press clock: the
-                        // timeout firing with no movement paints a loop.
-                        val event = if (mode is RulerMode.Undecided) {
-                            val left = pressStart + longPressMs - android.os.SystemClock.uptimeMillis()
-                            withTimeoutOrNull(left.coerceAtLeast(1L)) { awaitPointerEvent() }
-                        } else {
-                            awaitPointerEvent()
-                        }
-                        if (event == null) {
-                            val f = tl.frameAt(down.position.x).coerceAtLeast(0)
-                            mode = RulerMode.Mark(f)
-                            loopDrag = f to f
-                            continue
-                        }
-                        val pressed = event.changes.filter { it.pressed }
-                        if (pressed.isEmpty()) {
-                            when (val m = mode) {
-                                is RulerMode.Undecided -> controller.seek(tl.frameAt(down.position.x))
-                                is RulerMode.Mark -> loopDrag?.let { (a, b) ->
-                                    val lo = minOf(a, b)
-                                    val hi = maxOf(a, b)
-                                    // Too short to loop = clear the region.
-                                    controller.setLoop(lo, hi, hi - lo >= sr)
+                        while (true) {
+                            // Undecided fingers race the long-press clock: the
+                            // timeout firing with no movement paints a loop.
+                            val event = if (mode is RulerMode.Undecided) {
+                                val left = pressStart + longPressMs - android.os.SystemClock.uptimeMillis()
+                                withTimeoutOrNull(left.coerceAtLeast(1L)) { awaitPointerEvent() }
+                            } else {
+                                awaitPointerEvent()
+                            }
+                            if (event == null) {
+                                val f = snapped(down.position.x)
+                                mode = RulerMode.Mark(f)
+                                loopDrag = f to f
+                                continue
+                            }
+                            val pressed = event.changes.filter { it.pressed }
+                            if (pressed.isEmpty()) {
+                                val region = loopDrag?.let { (a, b) -> minOf(a, b) to maxOf(a, b) }
+                                when (mode) {
+                                    is RulerMode.Undecided -> controller.seek(tl.frameAt(down.position.x))
+                                    is RulerMode.Mark -> region?.let { (lo, hi) ->
+                                        // A hold without a drag marks nothing.
+                                        if (hi > lo) controller.setLoopRegion(lo, hi)
+                                    }
+                                    is RulerMode.Edge -> region?.let { (lo, hi) ->
+                                        val cur = controller.song
+                                        if (hi - lo < cur.sampleRate) {
+                                            controller.message = "Loop needs at least one second"
+                                        } else {
+                                            controller.setLoop(lo, hi, cur.loopEnabled)
+                                        }
+                                    }
+                                    else -> {}
                                 }
-                                is RulerMode.Edge -> loopDrag?.let { (a, b) ->
-                                    val lo = minOf(a, b)
-                                    val hi = maxOf(a, b)
-                                    controller.setLoop(lo, hi, controller.song.loopEnabled)
+                                loopDrag = null
+                                break
+                            }
+
+                            if (pressed.size >= 2 && (mode is RulerMode.Undecided || mode is RulerMode.Pan || mode is RulerMode.Pinch)) {
+                                mode = RulerMode.Pinch
+                                val zoomChange = event.calculateZoom()
+                                val panChange = event.calculatePan()
+                                val centroid = event.calculateCentroid()
+                                if (zoomChange != 1f) tl.zoom(zoomChange, centroid.x)
+                                if (panChange.x != 0f) tl.pan(panChange.x)
+                                if (zoomChange != 1f || panChange.x != 0f) releaseFollow(tl, controller)
+                                event.changes.forEach { it.consume() }
+                                continue
+                            }
+
+                            val change = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+                            val delta = change.positionChange()
+                            val x = change.position.x
+                            when (val m = mode) {
+                                is RulerMode.Undecided -> {
+                                    acc += delta
+                                    if (acc.getDistance() > slop) mode = RulerMode.Pan
+                                }
+                                is RulerMode.Pan -> {
+                                    change.consume()
+                                    tl.pan(delta.x)
+                                    if (delta.x != 0f) releaseFollow(tl, controller)
+                                }
+                                is RulerMode.Mark -> {
+                                    change.consume()
+                                    loopDrag = m.anchor to snapped(x)
+                                }
+                                is RulerMode.Edge -> {
+                                    change.consume()
+                                    val f = snapped(x)
+                                    loopDrag = if (m.left) f to m.otherEdge else m.otherEdge to f
                                 }
                                 else -> {}
                             }
-                            loopDrag = null
-                            break
                         }
+                    }
+                },
+        ) {
+            // Loop region band (preview while dragging, else the committed one).
+            val region = loopDrag?.let { (a, b) -> minOf(a, b) to maxOf(a, b) }
+                ?: (song.loopStart to song.loopEnd).takeIf { song.loopEnd > song.loopStart }
+            if (region != null) {
+                val (ls, le) = region
+                val x0 = tl.pxOf(ls)
+                val x1 = tl.pxOf(le)
+                val on = song.loopEnabled || loopDrag != null
+                val band = Colors.green.copy(alpha = if (on) 0.22f else 0.10f)
+                val bracket = Colors.green.copy(alpha = if (on) 1f else 0.45f)
+                if (x1 > x0) {
+                    drawRect(
+                        band,
+                        topLeft = Offset(x0.coerceAtLeast(0f), 0f),
+                        size = Size(x1.coerceAtMost(size.width) - x0.coerceAtLeast(0f), size.height),
+                    )
+                }
+                // A fat tab at each end, so the edges read as grabbable.
+                val tabW = 6.dp.toPx()
+                drawRect(bracket, Offset(x0 - tabW / 2f, 0f), Size(tabW, size.height))
+                drawRect(bracket, Offset(x1 - tabW / 2f, 0f), Size(tabW, size.height))
+            }
 
-                        if (pressed.size >= 2 && (mode is RulerMode.Undecided || mode is RulerMode.Pan || mode is RulerMode.Pinch)) {
-                            mode = RulerMode.Pinch
-                            val zoomChange = event.calculateZoom()
-                            val panChange = event.calculatePan()
-                            val centroid = event.calculateCentroid()
-                            if (zoomChange != 1f) tl.zoom(zoomChange, centroid.x)
-                            if (panChange.x != 0f) tl.pan(panChange.x)
-                            if (zoomChange != 1f || panChange.x != 0f) releaseFollow(tl, controller)
-                            event.changes.forEach { it.consume() }
-                            continue
+            val tickH = 6.dp.toPx()
+            // Numbers under the clear button would read as part of it.
+            val clearAt = if (loopDrag == null && song.loopEnd > song.loopStart) {
+                clearLoopX(tl.pxOf(song.loopEnd), size.width, 40.dp.toPx(), 3.dp.toPx())
+            } else null
+            fun label(text: String, x: Float, style: androidx.compose.ui.text.TextStyle) {
+                if (labels.size > 256) labels.clear()
+                val l = labels.getOrPut(text + style.color.value) { measurer.measure(AnnotatedString(text), style) }
+                val x0 = x + 5f
+                val x1 = x0 + l.size.width
+                if (x < 0f) return
+                if (clearAt != null && x1 > clearAt && x0 < clearAt + 40.dp.toPx()) return
+                if (x1 <= size.width) drawText(l, topLeft = Offset(x0, 2f))
+            }
+            if (ui.clockAsTime) {
+                val sr = song.sampleRate
+                val stepFrames = gridStepFrames(tl.framesPerPx, sr)
+                var f = (tl.originFrame / stepFrames) * stepFrames
+                while (true) {
+                    val x = tl.pxOf(f)
+                    if (x > size.width) break
+                    if (x >= 0f) {
+                        drawLine(Colors.dim, Offset(x, size.height - tickH), Offset(x, size.height))
+                        label(formatRulerTime(f, sr), x, RulerLabelStyle)
+                    }
+                    f += stepFrames
+                }
+            } else {
+                forEachBarLine(tl, song, size.width) { frame, bar, beat, kind ->
+                    val x = tl.pxOf(frame)
+                    when (kind) {
+                        LineKind.LabelledBar -> {
+                            drawLine(Colors.dim, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1.5f)
+                            label("${bar + 1}", x, RulerBarStyle)
                         }
-
-                        val change = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
-                        val delta = change.positionChange()
-                        val x = change.position.x
-                        when (val m = mode) {
-                            is RulerMode.Undecided -> {
-                                acc += delta
-                                if (acc.getDistance() > slop) mode = RulerMode.Pan
-                            }
-                            is RulerMode.Pan -> {
-                                change.consume()
-                                tl.pan(delta.x)
-                                if (delta.x != 0f) releaseFollow(tl, controller)
-                            }
-                            is RulerMode.Mark -> {
-                                change.consume()
-                                loopDrag = m.anchor to tl.frameAt(x).coerceAtLeast(0)
-                            }
-                            is RulerMode.Edge -> {
-                                change.consume()
-                                val f = tl.frameAt(x).coerceAtLeast(0)
-                                loopDrag = if (m.left) f to m.otherEdge else m.otherEdge to f
-                            }
-                            else -> {}
+                        LineKind.Bar -> drawLine(Colors.dim, Offset(x, size.height - tickH * 1.4f), Offset(x, size.height))
+                        LineKind.Beat -> drawLine(Colors.line, Offset(x, size.height - tickH), Offset(x, size.height), strokeWidth = 1.5f)
+                        LineKind.LabelledBeat -> {
+                            drawLine(Colors.line, Offset(x, size.height - tickH), Offset(x, size.height), strokeWidth = 1.5f)
+                            label("${bar + 1}.${beat + 1}", x, RulerLabelStyle)
                         }
                     }
                 }
-            },
-    ) {
-        // Loop region band (preview while dragging, else the committed one).
-        val region = loopDrag?.let { (a, b) -> minOf(a, b) to maxOf(a, b) }
-            ?: (song.loopStart to song.loopEnd).takeIf { song.loopEnd > song.loopStart }
-        if (region != null) {
-            val (ls, le) = region
-            val x0 = tl.pxOf(ls)
-            val x1 = tl.pxOf(le)
-            val on = song.loopEnabled || loopDrag != null
-            val band = Colors.green.copy(alpha = if (on) 0.22f else 0.10f)
-            val bracket = Colors.green.copy(alpha = if (on) 1f else 0.45f)
-            if (x1 > x0) {
-                drawRect(
-                    band,
-                    topLeft = Offset(x0.coerceAtLeast(0f), 0f),
-                    size = Size(x1.coerceAtMost(size.width) - x0.coerceAtLeast(0f), size.height),
-                )
             }
-            // A fat tab at each end, so the edges read as grabbable.
-            val tabW = 6.dp.toPx()
-            drawRect(bracket, Offset(x0 - tabW / 2f, 0f), Size(tabW, size.height))
-            drawRect(bracket, Offset(x1 - tabW / 2f, 0f), Size(tabW, size.height))
+            drawLine(Colors.line, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f))
+            val px = tl.pxOf(controller.playheadFrame)
+            if (px in 0f..size.width) {
+                drawLine(Colors.accent, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
+                val w = 5.dp.toPx()
+                drawRect(Colors.accent, Offset(px - w, 0f), Size(2 * w, 4.dp.toPx()))
+            }
         }
 
-        val stepFrames = gridStepFrames(tl.framesPerPx, sr)
-        var f = (tl.originFrame / stepFrames) * stepFrames
-        while (true) {
-            val x = tl.pxOf(f)
-            if (x > size.width) break
-            if (x >= 0f) {
-                drawLine(Colors.dim, Offset(x, size.height - 6.dp.toPx()), Offset(x, size.height))
-                if (labels.size > 256) labels.clear()
-                val label = labels.getOrPut(f) {
-                    measurer.measure(AnnotatedString(formatRulerTime(f, sr)), RulerLabelStyle)
-                }
-                if (x + 4f + label.size.width <= size.width) {
-                    drawText(label, topLeft = Offset(x + 5f, 2f))
-                }
-            }
-            f += stepFrames
-        }
-        drawLine(Colors.line, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f))
-        val px = tl.pxOf(controller.playheadFrame)
-        if (px in 0f..size.width) {
-            drawLine(Colors.accent, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
-            val w = 5.dp.toPx()
-            drawRect(Colors.accent, Offset(px - w, 0f), Size(2 * w, 4.dp.toPx()))
+        if (loopDrag == null && song.loopEnd > song.loopStart) {
+            ClearLoopButton(tl, controller, constraints.maxWidth.toFloat())
         }
     }
 }
 
+/**
+ * Sits just outside the loop's right tab, or just inside it when the tab is
+ * near the right edge; gone while that edge is off screen. Placed in the
+ * layout phase, so panning moves it without recomposing the ruler.
+ */
+@Composable
+private fun ClearLoopButton(tl: TimelineState, controller: SongController, widthPx: Float) {
+    val w = 40.dp
+    Box(
+        Modifier
+            .offset {
+                val x = clearLoopX(tl.pxOf(controller.song.loopEnd), widthPx, w.toPx(), 3.dp.toPx())
+                IntOffset((x ?: -10_000f).toInt(), 0)
+            }
+            .width(w)
+            .fillMaxHeight()
+            .clickable { controller.clearLoop() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(20.dp)
+                .background(Colors.bg, CircleShape)
+                .border(1.dp, Colors.green, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.size(10.dp)) { CloseGlyph(Colors.green) }
+        }
+    }
+}
+
+/** Left edge of the clear button for a loop ending at [xr], or null when
+ *  that end is off screen. */
+private fun clearLoopX(xr: Float, widthPx: Float, buttonPx: Float, tabPx: Float): Float? = when {
+    xr < 0f || xr > widthPx -> null
+    xr + tabPx + buttonPx <= widthPx -> xr + tabPx
+    else -> xr - tabPx - buttonPx
+}
+
 private val RulerLabelStyle = MonoDimStyle.copy(fontSize = 10.sp)
+private val RulerBarStyle = MonoStyle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold)
 private val GridSteps = floatArrayOf(0.1f, 0.25f, 0.5f, 1f, 2f, 5f, 10f, 15f, 30f, 60f, 120f, 300f)
 
 fun gridStepFrames(framesPerPx: Float, sampleRate: Int): Long {
@@ -352,14 +447,72 @@ fun gridStepFrames(framesPerPx: Float, sampleRate: Int): Long {
     return (sec * sampleRate).toLong()
 }
 
-fun DrawScope.drawGrid(tl: TimelineState, sampleRate: Int) {
-    val step = gridStepFrames(tl.framesPerPx, sampleRate)
-    var f = (tl.originFrame / step) * step
+internal enum class LineKind { LabelledBar, Bar, LabelledBeat, Beat }
+
+private val BarSteps = intArrayOf(1, 2, 4, 8, 16, 32, 64, 128, 256)
+
+/**
+ * Every bar and beat line in view, thinned to what the zoom can show: bars
+ * get a number every so many bars, beats appear once they are far enough
+ * apart to tell, and get a number of their own when zoomed right in.
+ */
+internal inline fun DrawScope.forEachBarLine(
+    tl: TimelineState,
+    song: Song,
+    widthPx: Float,
+    line: (frame: Long, bar: Int, beat: Int, kind: LineKind) -> Unit,
+) {
+    val fpBar = song.framesPerBar
+    if (fpBar <= 0.0) return
+    val barPx = (fpBar / tl.framesPerPx).toFloat()
+    val labelEvery = BarSteps.firstOrNull { barPx * it >= 44.dp.toPx() } ?: 512
+    val lineEvery = BarSteps.firstOrNull { barPx * it >= 12.dp.toPx() } ?: 512
+    val bpb = song.beatsPerBar.coerceAtLeast(1)
+    val beatPx = barPx / bpb
+    val beats = beatPx >= 10.dp.toPx()
+    val beatLabels = beatPx >= 34.dp.toPx()
+    val first = Math.floor(tl.originFrame / fpBar).toInt().coerceAtLeast(0)
+    var bar = first - first % lineEvery
     while (true) {
-        val x = tl.pxOf(f)
-        if (x > size.width) break
-        if (x >= 0f) drawLine(Colors.line.copy(alpha = 0.35f), Offset(x, 0f), Offset(x, size.height))
-        f += step
+        val f = song.barStartFrame(bar)
+        if (tl.pxOf(f) > widthPx) break
+        if (bar % lineEvery == 0) {
+            line(f, bar, 0, if (bar % labelEvery == 0) LineKind.LabelledBar else LineKind.Bar)
+        }
+        if (beats) {
+            for (b in 1 until bpb) {
+                val bf = Math.round(bar * fpBar + b * song.framesPerSongBeat)
+                line(bf, bar, b, if (beatLabels) LineKind.LabelledBeat else LineKind.Beat)
+            }
+        }
+        bar += if (beats) 1 else lineEvery
+    }
+}
+
+/** The grid behind the lanes: bars and beats, or seconds when the clock
+ *  reads time. */
+fun DrawScope.drawGrid(tl: TimelineState, song: Song, asTime: Boolean) {
+    if (asTime) {
+        val step = gridStepFrames(tl.framesPerPx, song.sampleRate)
+        var f = (tl.originFrame / step) * step
+        while (true) {
+            val x = tl.pxOf(f)
+            if (x > size.width) break
+            if (x >= 0f) drawLine(Colors.line.copy(alpha = 0.35f), Offset(x, 0f), Offset(x, size.height))
+            f += step
+        }
+    } else {
+        forEachBarLine(tl, song, size.width) { frame, _, _, kind ->
+            val x = tl.pxOf(frame)
+            if (x >= 0f) {
+                val alpha = when (kind) {
+                    LineKind.LabelledBar -> 0.6f
+                    LineKind.Bar -> 0.4f
+                    else -> 0.18f
+                }
+                drawLine(Colors.line.copy(alpha = alpha), Offset(x, 0f), Offset(x, size.height))
+            }
+        }
     }
     drawLine(Colors.line, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f))
 }
@@ -477,6 +630,16 @@ private sealed interface DragMode {
     object Pan : DragMode
 }
 
+private val DragMode.clipId: Int?
+    get() = when (this) {
+        is DragMode.Move -> clip.id
+        is DragMode.TrimL -> clip.id
+        is DragMode.TrimR -> clip.id
+        is DragMode.FadeL -> clip.id
+        is DragMode.FadeR -> clip.id
+        DragMode.Pan -> null
+    }
+
 // Gesture contract. One handler for all of it: separate tap and drag detectors
 // race each other and capture stale clip lists.
 //  - tap selects/deselects
@@ -513,15 +676,39 @@ private fun hitTest(
     }
 }
 
+/**
+ * Where a clip drag lands on [grid]: a moved take keeps its own timing and
+ * moves by whole grid steps, while pattern clips and trim edges land on the
+ * grid itself. The drag preview and the commit both come through here, so
+ * nothing jumps on release.
+ */
+private fun snappedTarget(m: DragMode, delta: Long, song: Song, grid: SnapGrid): Long = when (m) {
+    is DragMode.Move ->
+        if (m.clip.isPattern) song.snapFrame(m.startFrame + delta, grid)
+        else m.startFrame + song.snapDelta(delta, grid)
+    is DragMode.TrimL -> song.snapFrame(m.edge + delta, grid)
+    is DragMode.TrimR -> song.snapFrame(m.edge + delta, grid)
+    is DragMode.FadeL -> m.startFade + delta
+    is DragMode.FadeR -> m.startFade - delta
+    DragMode.Pan -> 0L
+}
+
+/**
+ * One track's clips. A tap on a clip selects it, a tap on empty space
+ * selects the track alone ([onSelectTrack] runs for both).
+ */
 @Composable
 fun ClipLane(
     track: Track,
     controller: SongController,
+    ui: SongUi,
     tl: TimelineState,
     peaks: Map<String, PeakData>,
     scroll: ScrollState,
     laneTop: Float,
     viewportPx: Int,
+    trackSelected: Boolean,
+    onSelectTrack: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val selected = controller.selectedClip
@@ -553,6 +740,7 @@ fun ClipLane(
         modifier
             .clipToBounds()
             .background(Colors.bg)
+            .then(if (trackSelected) Modifier.background(Colors.accent.copy(alpha = 0.05f)) else Modifier)
             // Measured in layout, not draw: a draw-phase write isn't reliably
             // observed by the composition that reads this.
             .onSizeChanged { tl.laneWidthPx = it.width.toFloat() }
@@ -565,24 +753,15 @@ fun ClipLane(
                     var pinching = false
 
                     fun commit() {
-                        when (val m = dragMode) {
-                            is DragMode.Move ->
-                                controller.moveClip(track.id, m.clip.id, m.startFrame + dragDeltaFrames)
-                            is DragMode.TrimL ->
-                                controller.trimClipLeft(track.id, m.clip.id, m.edge + dragDeltaFrames)
-                            is DragMode.TrimR ->
-                                controller.trimClipRight(track.id, m.clip.id, m.edge + dragDeltaFrames)
-                            is DragMode.FadeL ->
-                                controller.setClipFades(
-                                    track.id, m.clip.id,
-                                    m.startFade + dragDeltaFrames, m.clip.fadeOut,
-                                )
-                            is DragMode.FadeR ->
-                                controller.setClipFades(
-                                    track.id, m.clip.id,
-                                    m.clip.fadeIn, m.startFade - dragDeltaFrames,
-                                )
-                            else -> {}
+                        val m = dragMode ?: return
+                        val to = snappedTarget(m, dragDeltaFrames, controller.song, ui.snap)
+                        when (m) {
+                            is DragMode.Move -> controller.moveClip(track.id, m.clip.id, to)
+                            is DragMode.TrimL -> controller.trimClipLeft(track.id, m.clip.id, to)
+                            is DragMode.TrimR -> controller.trimClipRight(track.id, m.clip.id, to)
+                            is DragMode.FadeL -> controller.setClipFades(track.id, m.clip.id, to, m.clip.fadeOut)
+                            is DragMode.FadeR -> controller.setClipFades(track.id, m.clip.id, m.clip.fadeIn, to)
+                            DragMode.Pan -> {}
                         }
                     }
 
@@ -595,8 +774,8 @@ fun ClipLane(
                                 val frame = tl.frameAt(down.position.x)
                                 val clips = controller.song.track(track.id)?.clips.orEmpty()
                                 val hit = clips.lastOrNull { frame >= it.start && frame < it.end }
-                                controller.selectedClip =
-                                    if (hit != null) track.id to hit.id else null
+                                controller.selectedClip = hit?.let { track.id to it.id }
+                                onSelectTrack(track.id)
                             } else {
                                 commit()
                             }
@@ -664,25 +843,22 @@ fun ClipLane(
             val top = scroll.value
             if (laneTop + size.height <= top || laneTop >= top + viewportPx) return@Canvas
         }
-        drawGrid(tl, controller.song.sampleRate)
+        drawGrid(tl, controller.song, ui.clockAsTime)
 
         for (clip in track.clips) {
-            // The in-flight drag previews through the same clamp functions the
-            // commit uses, so what is drawn is what will land.
+            // The in-flight drag previews through the same snap and clamp
+            // functions the commit uses, so what is drawn is what will land.
             val m = dragMode
-            val preview = when {
-                m is DragMode.Move && m.clip.id == clip.id ->
-                    clip.movedTo(m.startFrame + dragDeltaFrames)
-                m is DragMode.TrimL && m.clip.id == clip.id ->
-                    clip.trimmedLeft(m.edge + dragDeltaFrames)
-                m is DragMode.TrimR && m.clip.id == clip.id -> clip.trimmedRight(
-                    m.edge + dragDeltaFrames, controller.takeFramesCached(clip.take),
-                )
-                m is DragMode.FadeL && m.clip.id == clip.id ->
-                    clip.withFades(m.startFade + dragDeltaFrames, clip.fadeOut)
-                m is DragMode.FadeR && m.clip.id == clip.id ->
-                    clip.withFades(clip.fadeIn, m.startFade - dragDeltaFrames)
-                else -> clip
+            val preview = if (m == null || m is DragMode.Pan || m.clipId != clip.id) clip else {
+                val to = snappedTarget(m, dragDeltaFrames, controller.song, ui.snap)
+                when (m) {
+                    is DragMode.Move -> clip.movedTo(to)
+                    is DragMode.TrimL -> clip.trimmedLeft(to)
+                    is DragMode.TrimR -> clip.trimmedRight(to, controller.takeFramesCached(clip.take))
+                    is DragMode.FadeL -> clip.withFades(to, clip.fadeOut)
+                    is DragMode.FadeR -> clip.withFades(clip.fadeIn, to)
+                    DragMode.Pan -> clip
+                }
             }
             val start = preview.start
             val srcStart = preview.srcStart
