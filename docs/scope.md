@@ -121,7 +121,7 @@ sheet. Compressed formats come later.
 
 ## Meters
 
-dB scale from -48 to +6 dBFS: green below -12, orange up to the red 0 dBFS line, red
+dB scale from -48 to +6 dBFS: green below -12, yellow up to the red 0 dBFS line, red
 past it, with the overload zone tinted even when idle. A peak-hold tick marks the
 loudest recent peak and latches red once it clipped. The hold time is a setting.
 

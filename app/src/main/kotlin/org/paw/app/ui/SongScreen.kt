@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.paw.app.AppPrefs
 import org.paw.app.PeakData
@@ -78,6 +79,11 @@ import org.paw.app.model.Track
 private val HEADER_W = 168.dp
 private val HEADER_W_COMPACT = 148.dp
 private val LANE_H_MAX = 128.dp
+private val OVERVIEW_H = 24.dp
+private val RULER_H = 28.dp
+
+/** Fit never zooms in closer than this, so a short song still has room. */
+private const val FIT_MIN_SECONDS = 20L
 
 enum class SongView { Tracks, Mix }
 
@@ -94,10 +100,16 @@ fun SongScreen(
 ) {
     val context = LocalContext.current
     val prefs = remember(context) { AppPrefs.of(context) }
+    val savedZoom = remember(controller) { prefs.zoomFor(controller.projectDir.name) }
     val tl = remember(controller) {
-        TimelineState().also { t ->
-            prefs.zoomFor(controller.projectDir.name)?.let { t.framesPerPx = it }
-        }
+        TimelineState().also { t -> savedZoom?.let { t.framesPerPx = it } }
+    }
+    // A song opened for the first time shows all of itself, not the first
+    // few seconds; an empty one shows enough room for a take.
+    LaunchedEffect(tl) {
+        if (savedZoom != null) return@LaunchedEffect
+        snapshotFlow { tl.laneWidthPx }.first { it > 0f }
+        tl.fitTo(maxOf(controller.song.endFrame, FIT_MIN_SECONDS * controller.song.sampleRate))
     }
     // Zoom survives leaving the song; the write sits out the pinch.
     LaunchedEffect(tl) {
@@ -168,7 +180,7 @@ fun SongScreen(
             }
 
             if (view == SongView.Tracks) SelectionBar(controller, compact, onOpenSampler)
-            TransportBar(controller, tl, compact = compact, short = short)
+            TransportBar(controller, tl, onOpenMetronome, compact = compact, short = short)
         }
     }
 }
@@ -252,7 +264,7 @@ private fun SongTopBar(
             HSpace(4.dp)
             Text(
                 song.name,
-                style = TitleStyle.copy(color = Colors.amber, fontSize = 18.sp),
+                style = TitleStyle.copy(fontSize = 18.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -317,9 +329,12 @@ private fun TracksView(
     val laneMin = if (short) 72.dp else 84.dp
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(28.dp)) {
-            Box(Modifier.width(headerW).fillMaxHeight().background(Colors.panel))
-            Ruler(tl, controller, Modifier.weight(1f).fillMaxHeight())
+        Row(Modifier.fillMaxWidth().height(OVERVIEW_H + RULER_H)) {
+            ZoomControls(controller, tl, Modifier.width(headerW).fillMaxHeight())
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                Overview(tl, controller, Modifier.fillMaxWidth().height(OVERVIEW_H))
+                Ruler(tl, controller, Modifier.fillMaxWidth().weight(1f))
+            }
         }
 
         BoxWithConstraints(Modifier.weight(1f)) {
@@ -338,7 +353,7 @@ private fun TracksView(
                 drawGrid(tl, song.sampleRate)
                 val px = tl.pxOf(controller.playheadFrame)
                 if (px in 0f..size.width) {
-                    drawLine(Colors.amber, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
+                    drawLine(Colors.accent, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
                 }
             }
 
@@ -368,26 +383,59 @@ private fun TracksView(
                         }
                     }
                 }
-                // New tracks are made where the tracks live.
-                for ((label, add) in listOf<Pair<String, () -> Unit>>(
-                    "+  Add track" to { controller.addTrack() },
-                    "+  Add beat track" to { controller.addBeatTrack() },
-                )) {
-                    Row(
-                        Modifier
-                            .width(headerW)
-                            .height(48.dp)
-                            .background(Colors.panel)
-                            .border(1.dp, Colors.line)
-                            .clickable(onClick = add)
-                            .padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(label, style = ButtonStyle.copy(color = Colors.amber), maxLines = 1)
+                // New tracks are made where the tracks live, both kinds on
+                // one row so neither scrolls away under a full song.
+                Row(
+                    Modifier
+                        .width(headerW)
+                        .height(48.dp)
+                        .background(Colors.panel)
+                        .border(1.dp, Colors.line),
+                ) {
+                    for ((label, add) in listOf<Pair<String, () -> Unit>>(
+                        "+ Track" to { controller.addTrack() },
+                        "+ Beats" to { controller.addBeatTrack() },
+                    )) {
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().clickable(onClick = add),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(label, style = ButtonStyle.copy(color = Colors.accent), maxLines = 1)
+                        }
+                        if (label == "+ Track") {
+                            Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 10.dp).background(Colors.line))
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Zoom out, fit the song, zoom in: the visible way to do what a pinch does.
+ * Zooming keeps the playhead where it is on screen when it is in view, else
+ * the middle of the view.
+ */
+@Composable
+private fun ZoomControls(controller: SongController, tl: TimelineState, modifier: Modifier) {
+    fun zoom(factor: Float) {
+        val ph = tl.pxOf(controller.playheadFrame)
+        val center = if (ph in 0f..tl.laneWidthPx) ph else tl.laneWidthPx / 2f
+        tl.zoom(factor, center)
+    }
+    Row(
+        modifier.background(Colors.panel).padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        AppButton("−", onClick = { zoom(1f / 1.6f) }, accent = Colors.dim, fontSize = 18.sp,
+            modifier = Modifier.weight(1f), padding = 0.dp)
+        AppButton("Fit", onClick = {
+            tl.fitTo(maxOf(controller.song.endFrame, FIT_MIN_SECONDS * controller.song.sampleRate))
+        }, accent = Colors.dim, fontSize = 12.sp, modifier = Modifier.weight(1.3f), padding = 0.dp)
+        AppButton("+", onClick = { zoom(1.6f) }, accent = Colors.dim, fontSize = 18.sp,
+            modifier = Modifier.weight(1f), padding = 0.dp)
     }
 }
 
@@ -442,7 +490,7 @@ private fun TrackHeader(
                 // open the sampler instead.
                 AppButton(
                     "Grid", onClick = { onOpenSampler(track.id, null) },
-                    accent = Colors.amber, height = btn, fontSize = 12.sp,
+                    accent = Colors.accent, height = btn, fontSize = 12.sp,
                     modifier = Modifier.weight(2f),
                 )
             } else {
@@ -451,7 +499,7 @@ private fun TrackHeader(
                 })
                 MonitorToggle(track, controller, btn, Modifier.weight(1f))
             }
-            Toggle("M", track.mute, Colors.amber, size = btn, modifier = Modifier.weight(1f), onClick = {
+            Toggle("M", track.mute, Colors.accent, size = btn, modifier = Modifier.weight(1f), onClick = {
                 controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
             })
             Toggle("S", track.solo, Colors.green, size = btn, modifier = Modifier.weight(1f), onClick = {
@@ -477,12 +525,12 @@ internal fun FxChip(onClick: () -> Unit) {
     Box(
         Modifier
             .clip(shape)
-            .border(1.dp, Colors.amber.copy(alpha = 0.55f), shape)
+            .border(1.dp, Colors.accent.copy(alpha = 0.55f), shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 7.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text("FX", style = LabelStyle.copy(color = Colors.amber, fontSize = 11.sp, letterSpacing = 1.sp), maxLines = 1)
+        Text("FX", style = LabelStyle.copy(color = Colors.accent, fontSize = 11.sp, letterSpacing = 1.sp), maxLines = 1)
     }
 }
 
@@ -541,8 +589,8 @@ private fun BoxScope.PlayheadChip(controller: SongController, tl: TimelineState,
             .padding(start = if (left) headerW + 6.dp else 0.dp, end = if (left) 0.dp else 6.dp)
             .size(width = 36.dp, height = 32.dp)
             .background(Colors.bg, shape)
-            .background(Colors.amber.copy(alpha = 0.22f), shape)
-            .border(1.dp, Colors.amber, shape)
+            .background(Colors.accent.copy(alpha = 0.22f), shape)
+            .border(1.dp, Colors.accent, shape)
             .clickable {
                 tl.follow = true
                 tl.showFrame(controller.playheadFrame)
@@ -551,7 +599,7 @@ private fun BoxScope.PlayheadChip(controller: SongController, tl: TimelineState,
     ) {
         Text(
             if (left) "◀" else "▶",
-            style = ButtonStyle.copy(color = Colors.amber, fontSize = 14.sp),
+            style = ButtonStyle.copy(color = Colors.accent, fontSize = 14.sp),
         )
     }
 }
@@ -562,10 +610,10 @@ internal fun MessageBanner(controller: SongController, modifier: Modifier) {
     Box(
         modifier
             .background(Colors.raised, androidx.compose.foundation.shape.RoundedCornerShape(Dimens.corner))
-            .border(1.dp, Colors.amber, androidx.compose.foundation.shape.RoundedCornerShape(Dimens.corner))
+            .border(1.dp, Colors.accent, androidx.compose.foundation.shape.RoundedCornerShape(Dimens.corner))
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Text(msg, style = BodyStyle.copy(color = Colors.amber), maxLines = 2)
+        Text(msg, style = BodyStyle.copy(color = Colors.accent), maxLines = 2)
     }
 }
 
@@ -601,8 +649,8 @@ private fun SelectionBar(
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Colors.amber.copy(alpha = 0.08f))
-            .border(1.dp, Colors.amber.copy(alpha = 0.5f))
+            .background(Colors.accent.copy(alpha = 0.08f))
+            .border(1.dp, Colors.accent.copy(alpha = 0.5f))
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -610,17 +658,17 @@ private fun SelectionBar(
         if (!compact) {
             Text(
                 "${if (clip.isPattern) "PATTERN" else "CLIP"}  ·  ${formatTime(clip.length, song.sampleRate)}",
-                style = LabelStyle.copy(color = Colors.amber),
+                style = LabelStyle.copy(color = Colors.accent),
                 modifier = Modifier.padding(horizontal = 6.dp),
                 maxLines = 1,
             )
         }
         if (clip.isPattern) {
-            AppButton("Edit", accent = Colors.amber, fontSize = 12.sp, modifier = Modifier.weight(1f),
+            AppButton("Edit", accent = Colors.accent, fontSize = 12.sp, modifier = Modifier.weight(1f),
                 onClick = { onOpenSampler(trackId, clip.pattern) })
         } else {
             // Turns the clip's slice into a sample on a beat track.
-            AppButton("Sample", accent = Colors.amber, fontSize = 12.sp, modifier = Modifier.weight(1.2f),
+            AppButton("Sample", accent = Colors.accent, fontSize = 12.sp, modifier = Modifier.weight(1.2f),
                 onClick = { controller.sampleFromClip(trackId, clipId) })
         }
         SplitButton(controller, trackId, clip, Modifier.weight(1.1f))
@@ -641,6 +689,7 @@ private fun SelectionBar(
 private fun TransportBar(
     controller: SongController,
     tl: TimelineState,
+    onOpenMetronome: () -> Unit,
     compact: Boolean,
     short: Boolean,
 ) {
@@ -677,7 +726,10 @@ private fun TransportBar(
         )
     }
     val modes: @Composable RowScope.() -> Unit = {
-        Toggle("Click", controller.clickEnabled, Colors.amber, onClick = {
+        // The tempo is read before every take, so it sits beside the click
+        // it drives; a tap opens the metronome to change it.
+        TempoButton(song.tempoBpm, song.beatsPerBar, onOpenMetronome)
+        Toggle("Click", controller.clickEnabled, Colors.accent, onClick = {
             controller.setClick(!controller.clickEnabled)
         })
         Toggle("Loop", song.loopEnabled, Colors.green, onClick = {
@@ -721,6 +773,29 @@ private fun TransportBar(
                 rec(Modifier.weight(1f))
             }
         }
+    }
+}
+
+/** Tempo over meter, in two small lines, framed like the toggles beside it. */
+@Composable
+private fun TempoButton(bpm: Float, beatsPerBar: Int, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(Dimens.corner)
+    Column(
+        Modifier
+            .heightIn(min = Dimens.touch)
+            .clip(shape)
+            .border(1.dp, Colors.line, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            "%.0f".format(bpm),
+            style = MonoStyle.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
+            maxLines = 1,
+        )
+        Text("BPM · $beatsPerBar/4", style = LabelStyle.copy(fontSize = 9.sp, letterSpacing = 0.5.sp), maxLines = 1)
     }
 }
 

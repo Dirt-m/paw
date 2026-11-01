@@ -132,7 +132,7 @@ fun RecordingsScreen(
             AppButton(
                 if (controller.importing) "Importing…" else "Import",
                 enabled = !controller.importing,
-                accent = Colors.amber,
+                accent = Colors.accent,
                 onClick = { picker.launch(arrayOf("audio/*")) },
                 modifier = Modifier.padding(end = 8.dp),
             )
@@ -197,7 +197,7 @@ private fun RecordingRow(
             AppButton(
                 if (playing) "■" else "▶",
                 onClick = { onAudition(entry) },
-                accent = if (playing) Colors.amber else Colors.text,
+                accent = if (playing) Colors.accent else Colors.text,
                 filled = playing,
                 height = 44.dp,
                 fontSize = 16.sp,
@@ -226,7 +226,7 @@ private fun RecordingRow(
             }
             AppButton(
                 if (placing) "Cancel" else "Add",
-                accent = if (placing) Colors.dim else Colors.amber,
+                accent = if (placing) Colors.dim else Colors.accent,
                 onClick = {
                     confirmingDelete = false
                     placing = !placing

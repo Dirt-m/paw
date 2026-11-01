@@ -39,6 +39,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.paw.app.SongController
@@ -52,8 +53,13 @@ import org.paw.app.model.groupingsFor
 // on the timeline.
 
 private val TileShape = RoundedCornerShape(Dimens.corner)
+// Rows and steps start at these sizes and grow into whatever the screen has
+// spare, up to the caps: a pad is easier to hit the bigger it is, and a grid
+// that fits the width needs no sideways scroll.
 private val RowH = 52.dp
+private val RowHMax = 104.dp
 private val CellW = 34.dp
+private val CellWMax = 56.dp
 private val TileW = 92.dp
 
 @Composable
@@ -85,7 +91,7 @@ fun SamplerScreen(
                         if (previewing) controller.stopPreview()
                         else controller.startPreview(trackId, pattern.id)
                     },
-                    accent = if (previewing) Colors.amber else Colors.green,
+                    accent = if (previewing) Colors.accent else Colors.green,
                 )
             }
         }
@@ -152,7 +158,7 @@ fun SamplerScreen(
                     "Place at playhead",
                     onClick = { controller.placePattern(trackId, pattern.id) },
                     modifier = Modifier.weight(1f),
-                    accent = Colors.amber,
+                    accent = Colors.accent,
                 )
             }
         }
@@ -177,7 +183,7 @@ private fun PatternStrip(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         for (p in patterns) {
-            Toggle(p.name, p.id == selected, Colors.amber, onClick = { onSelect(p.id) })
+            Toggle(p.name, p.id == selected, Colors.accent, onClick = { onSelect(p.id) })
         }
         AppButton("+ New", onClick = onNew, accent = Colors.green)
         if (onCopy != null) AppButton("Copy", onClick = onCopy, accent = Colors.dim)
@@ -250,33 +256,40 @@ private fun StepGrid(
     pattern: Pattern?,
 ) {
     val hScroll = rememberScrollState()
-    Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Column(Modifier.width(TileW + Dimens.gap).padding(start = Dimens.gap)) {
-            if (pattern != null) Box(Modifier.height(20.dp))
-            for (s in samples) {
-                SampleTile(s.name, onHit = { controller.triggerSample(trackId, s.id) })
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val head = if (pattern != null) 20.dp else 0.dp
+        val rowH = ((maxHeight - head - Dimens.gap) / samples.size.coerceAtLeast(1)).coerceIn(RowH, RowHMax)
+        val cellW = pattern?.let {
+            ((maxWidth - TileW - Dimens.gap * 3) / it.steps.coerceAtLeast(1)).coerceIn(CellW, CellWMax)
+        } ?: CellW
+        Row(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Column(Modifier.width(TileW + Dimens.gap).padding(start = Dimens.gap)) {
+                if (pattern != null) Box(Modifier.height(head))
+                for (s in samples) {
+                    SampleTile(s.name, rowH, onHit = { controller.triggerSample(trackId, s.id) })
+                }
             }
-        }
-        if (pattern != null) {
-            Column(Modifier.weight(1f).horizontalScroll(hScroll).padding(end = Dimens.gap)) {
-                BeatNumbers(pattern)
-                StepCells(controller, samples, pattern)
+            if (pattern != null) {
+                Column(Modifier.weight(1f).horizontalScroll(hScroll).padding(end = Dimens.gap)) {
+                    BeatNumbers(pattern, cellW)
+                    StepCells(controller, samples, pattern, cellW, rowH)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SampleTile(name: String, onHit: () -> Unit) {
+private fun SampleTile(name: String, rowH: Dp, onHit: () -> Unit) {
     var down by remember { mutableStateOf(false) }
     Box(
         Modifier
             .padding(vertical = 3.dp)
             .width(TileW)
-            .height(RowH - 6.dp)
+            .height(rowH - 6.dp)
             .clip(TileShape)
-            .background(if (down) Colors.amber else Colors.raised)
-            .border(1.dp, if (down) Colors.amber else Colors.line, TileShape)
+            .background(if (down) Colors.accent else Colors.raised)
+            .border(1.dp, if (down) Colors.accent else Colors.line, TileShape)
             .pointerInput(onHit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
@@ -310,7 +323,7 @@ private fun groupStarts(p: Pattern): Set<Int> {
 }
 
 @Composable
-private fun BeatNumbers(p: Pattern) {
+private fun BeatNumbers(p: Pattern, cellW: Dp) {
     Row(Modifier.height(20.dp)) {
         val groups = groupStarts(p)
         for (bar in 0 until p.bars) for (beat in 0 until p.beats) {
@@ -320,7 +333,7 @@ private fun BeatNumbers(p: Pattern) {
                     fontSize = 10.sp,
                     color = if (beat == 0) Colors.text else if (beat in groups) Colors.dim else Colors.line,
                 ),
-                modifier = Modifier.width(CellW * p.stepsPerBeat).padding(start = 3.dp),
+                modifier = Modifier.width(cellW * p.stepsPerBeat).padding(start = 3.dp),
                 maxLines = 1,
             )
         }
@@ -328,7 +341,7 @@ private fun BeatNumbers(p: Pattern) {
 }
 
 @Composable
-private fun StepCells(controller: SongController, samples: List<Sample>, p: Pattern) {
+private fun StepCells(controller: SongController, samples: List<Sample>, p: Pattern, cellW: Dp, rowH: Dp) {
     val steps = p.steps
     val playing = controller.previewing == p.id
     val previewFrame = if (playing) controller.previewFrame else -1L
@@ -344,20 +357,20 @@ private fun StepCells(controller: SongController, samples: List<Sample>, p: Patt
 
     Canvas(
         Modifier
-            .width(CellW * steps)
-            .height(RowH * samples.size)
-            .pointerInput(p.id, samples, p.hits, p.ticksPerStep) {
+            .width(cellW * steps)
+            .height(rowH * samples.size)
+            .pointerInput(p.id, samples, p.hits, p.ticksPerStep, cellW, rowH) {
                 detectTapGestures { pos ->
-                    val col = (pos.x / CellW.toPx()).toInt()
-                    val row = (pos.y / RowH.toPx()).toInt()
+                    val col = (pos.x / cellW.toPx()).toInt()
+                    val row = (pos.y / rowH.toPx()).toInt()
                     val s = samples.getOrNull(row) ?: return@detectTapGestures
                     if (col !in 0 until steps) return@detectTapGestures
                     controller.setStep(p.id, s.id, col, col !in on[row])
                 }
             },
     ) {
-        val cw = CellW.toPx()
-        val rh = RowH.toPx()
+        val cw = cellW.toPx()
+        val rh = rowH.toPx()
         val inset = 3.dp.toPx()
         for (col in 0 until steps) {
             val beatInBar = (col / p.stepsPerBeat) % p.beats
@@ -382,7 +395,7 @@ private fun StepCells(controller: SongController, samples: List<Sample>, p: Patt
             for (row in samples.indices) {
                 val hit = col in on[row]
                 drawRoundRect(
-                    if (hit) Colors.amber else Colors.raised,
+                    if (hit) Colors.accent else Colors.raised,
                     topLeft = Offset(col * cw + inset, row * rh + inset),
                     size = Size(cw - 2 * inset, rh - 2 * inset),
                     cornerRadius = CornerRadius(4.dp.toPx()),

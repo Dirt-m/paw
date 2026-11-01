@@ -66,7 +66,7 @@ private val ButtonShape = RoundedCornerShape(Dimens.corner)
 /**
  * The app's button. Outlined by default; [filled] makes it the primary
  * action of its row (tinted background). [accent] colors both the border and
- * the label: red for destructive, amber for primary, text for neutral.
+ * the label: red for destructive, accent for primary, text for neutral.
  */
 @Composable
 fun AppButton(
@@ -78,6 +78,7 @@ fun AppButton(
     filled: Boolean = false,
     height: Dp = Dimens.touch,
     fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    padding: Dp = 14.dp,
 ) {
     val border = if (!enabled) Colors.line else if (filled) accent else accent.copy(alpha = 0.55f)
     val tint = if (enabled) accent else Colors.dim.copy(alpha = 0.6f)
@@ -88,7 +89,7 @@ fun AppButton(
             .background(if (filled && enabled) accent.copy(alpha = 0.18f) else Color.Transparent)
             .border(1.dp, border, ButtonShape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = padding),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -174,7 +175,7 @@ fun Segmented(
     selected: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    accent: Color = Colors.amber,
+    accent: Color = Colors.accent,
 ) {
     Row(
         modifier
@@ -345,13 +346,13 @@ fun NameField(
         value = value,
         onValueChange = { onValueChange(it.take(maxLength)) },
         textStyle = NameStyle,
-        cursorBrush = SolidColor(Colors.amber),
+        cursorBrush = SolidColor(Colors.accent),
         singleLine = true,
         modifier = modifier
             .heightIn(min = Dimens.touch)
             .clip(ButtonShape)
             .background(Colors.raised)
-            .border(1.dp, Colors.amber, ButtonShape)
+            .border(1.dp, Colors.accent, ButtonShape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     )
 }
@@ -423,7 +424,7 @@ fun MiniSlider(
     value: Float,
     onChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
-    accent: Color = Colors.amber,
+    accent: Color = Colors.accent,
     onCommit: (() -> Unit)? = null,
     onStart: (() -> Unit)? = null,
     onReset: (() -> Unit)? = null,
@@ -541,7 +542,7 @@ private class MeterState {
 }
 
 /**
- * Peak meter, dB scale. Green below -12 dBFS, orange from there to the red
+ * Peak meter, dB scale. Green below -12 dBFS, yellow from there to the red
  * 0 dBFS line, red past it (the zone beyond the line stays tinted so it
  * reads as overload). A tick holds the loudest recent peak for [hold] (null =
  * off, Duration.INFINITE = until resetKey changes), and turns red once it clipped.
@@ -597,7 +598,7 @@ fun MeterBar(
             )
             if (y < warnY) {
                 drawRect(
-                    Colors.orange,
+                    Colors.warn,
                     topLeft = Offset(0f, maxOf(y, clipY)),
                     size = Size(size.width, warnY - maxOf(y, clipY)),
                 )
@@ -628,7 +629,7 @@ fun MeterBar(
             drawRect(Colors.green, size = size.copy(width = minOf(x, warnX)))
             if (x > warnX) {
                 drawRect(
-                    Colors.orange,
+                    Colors.warn,
                     topLeft = Offset(warnX, 0f),
                     size = Size(minOf(x, clipX) - warnX, size.height),
                 )

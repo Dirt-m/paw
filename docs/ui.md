@@ -17,18 +17,25 @@ its own.
 
 **Songs.** The list. One primary action, New song, with Settings beside it. Each row
 opens on tap; rename and delete sit behind the row's own menu, and delete asks
-whether the recordings go with the song or stay on disk.
+whether the recordings go with the song or stay on disk. A row shows the song in
+miniature (a bar per clip, one line per track, beat tracks in the accent) beside its
+name, track count, length and when it was last changed, so the song you want is found
+by its shape as much as by its name. The manifests are read after the list appears,
+so a slow card never holds the list up.
 
 **Song.** Three bands, top to bottom:
 
-- Top bar: back to Songs, the song name, what the engine is listening to (a green DUO
+- Top bar: back to Songs, the song name (in the text colour; the accent is kept for
+  controls), what the engine is listening to (a green DUO
   or MIC, red LOST when the interface goes away), undo, redo, and a menu with
   Recordings, Metronome, Sampler, Export mixdown and Settings. Under it, on a phone, the Tracks / Mix tabs.
 - The workspace, either the timeline or the mixer.
-- The transport, at the bottom where the thumb rests: the clock, Click and Loop above,
-  then return-to-start, Play/Stop and Rec as the biggest buttons on the screen. A thin
+- The transport, at the bottom where the thumb rests: the clock, the tempo, Click and
+  Loop above, then return-to-start, Play/Stop and Rec as the biggest buttons on the screen. A thin
   master meter runs along the top edge of the transport and turns red at the far right
-  when the mix clips.
+  when the mix clips. The tempo shows the BPM over the meter (112 over BPM · 4/4)
+  and opens the metronome, because the tempo is checked before every take and was
+  otherwise two taps deep in a menu.
 
 When a clip is selected, a row of clip actions (Sample for an audio clip or Edit for a
 pattern clip, then Split, Duplicate, move up or down a track, Delete) appears between the workspace and the transport. It exists only while
@@ -40,9 +47,19 @@ so does the rest of the header, so a near miss still lands there. Monitor sits o
 row rather than on the track screen because it gets switched while playing. Armed tracks show their input source next to the name
 (DUO 1, MIC), which is the moment that information matters. Volume is not in the
 header: at phone width a header fader is 90 dp long and imprecise, and it crowds
-everything else. Add track and Add beat track are labelled rows under the last lane.
+everything else. Under the last lane, one row holds + Track and + Beats side by side,
+so neither drops off the bottom of a full song.
 A beat track's header has Grid where arm and monitor would be, and its lane draws
 pattern clips as their name, a mark per hit and a line where each repeat starts.
+
+Above the ruler, the overview strip draws the whole song: a thin line per track with
+its clips, the loop, the playhead, and a frame around the part the lanes show. Touch
+or drag anywhere on it and the frame centres there, so any point of a long song is one
+move away at any zoom. In the corner above the track headers, − / Fit / + zoom out,
+show the whole song and zoom in; they are the visible controls for what a pinch does,
+and zooming keeps the playhead where it sits on screen. A song opened for the first
+time is fitted, not shown at a fixed few seconds; an empty one shows twenty seconds.
+After that the zoom is remembered per song.
 
 The ruler seeks on tap. The loop region is drawn as a green band with a tab at each
 end; drag a tab to resize it. Hold and drag anywhere on the ruler to paint a new one.
@@ -51,7 +68,7 @@ the whole song, so Loop never does nothing.
 
 Clip gestures: tap to select, drag the body of the selected clip to move it, its lower
 edges to trim, its top corners to fade; elsewhere a drag pans and a pinch zooms. The
-selected clip draws what it offers: an amber grip pill straddles each edge on the
+selected clip draws what it offers: an accent grip pill straddles each edge on the
 lower half (trim), a green ring sits at the top end of each fade ramp (drag it
 sideways), and the silent wedge under a fade is shaded. When the playhead leaves the
 view, a small arrow chip appears on the lane edge nearest to it; tapping it brings the
@@ -84,7 +101,9 @@ loops the pattern on its own. Under it, the song's patterns as a row of chips wi
 and Copy, then the pattern's time signature (beat count and unit), its bars and steps
 per beat, and its groupings when there is more than one. Then the grid: the samples
 down the left as tiles, which sound on touch down and take one finger each, and a row
-of steps beside each, tapped on and off. Groups are shaded in turn and bars carry the
+of steps beside each, tapped on and off. Rows and steps grow into the space the
+screen has spare (rows up to 104 dp, steps up to 56 dp), so a small kit gets big pads
+instead of a strip of small ones above an empty screen. Groups are shaded in turn and bars carry the
 strongest line. Place at playhead runs along the bottom. In landscape the pattern
 controls move to a column on the left so the grid keeps its height.
 
@@ -112,8 +131,9 @@ microphone on the track screen.
 - Touch targets are 40 dp or more; transport buttons are 52 dp.
 - Controls are rounded (6 dp) so they read as pressable; surfaces (lanes, panels,
   lists) are square so they read as workspace.
-- Amber is the accent and means "this is the primary thing here". Red means recording
-  or clipping. Green means an active mode (solo, loop, an input that is open).
+- Lilac is the accent and means "this is the primary thing here": the selected tab,
+  the primary button, the selected clip, the playhead, pattern hits. It is kept clear
+  of the two state colours. Red means recording or clipping. Green means an active mode (solo, loop, an input that is open).
 - Words are set in the system sans; numbers that change under the eye (the clock, dB,
   times) are monospace so they do not jitter.
 - Destructive actions (remove track, delete recording, delete song) confirm inline,

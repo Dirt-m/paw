@@ -69,6 +69,10 @@ pressed them on the device. In rough order of risk:
     from there, and the move of existing songs out of the private folder.
 14. Panning and pinching in the empty space under the lanes, and the new header
     buttons (monitor, FX) under the finger.
+15. The overview strip under the finger (touch and drag to move the view, while
+    playing too), the − / Fit / + zoom buttons, the fit on a song's first open, the
+    tempo button, the song list thumbnails read from real manifests, and the sampler
+    grid's larger pads. All of it is checked only in the snapshots.
 
 ## Known issues
 
@@ -111,7 +115,7 @@ pressed them on the device. In rough order of risk:
 - `Engine.kt` (JNI), `AudioDevices.kt` (endpoint enumeration), `AppPrefs.kt`,
   `Latency.kt`, `MainActivity.kt` (navigation, permissions, stream lifecycle).
 - `ui/`: `SongScreen.kt` (top bar, tracks view, selection row, transport),
-  `Timeline.kt` (view window, ruler, lanes, waveforms), `MixerView.kt`,
+  `Timeline.kt` (view window, overview, ruler, lanes, waveforms), `MixerView.kt`,
   `TrackDetailScreen.kt`, `RecordingsScreen.kt`, `OptionsScreen.kt`, `MetronomeScreen.kt`, `SamplerScreen.kt`,
   `ProjectListScreen.kt`, `Widgets.kt`, `Theme.kt`.
 - `app/src/test/kotlin/.../snap/`: the JVM snapshot harness (`ShadowEngine`,
