@@ -240,14 +240,13 @@ class MainActivity : ComponentActivity() {
                         summaries = summaries,
                         loading = !songsReady,
                         onOpen = { openSong(it.dir) },
-                        onCreate = { name ->
-                            // The first input that is actually there: an
-                            // interface if one is plugged in, else the mic.
-                            val input = usbInputs.firstOrNull()
-                                ?.let { InputDevice.Usb(it.name) } ?: InputDevice.Mic
-                            if (!store.exists(name)) store.create(name, input)
+                        onCreate = {
+                            // On the first interface that is plugged in, armed
+                            // and ready; without one, on the mic and unarmed.
+                            val input = usbInputs.firstOrNull()?.let { InputDevice.Usb(it.name) }
+                            val song = store.createIdea(input, armed = input != null)
                             entries = store.list()
-                            openSong(store.dirFor(name))
+                            openSong(store.dirFor(song.name))
                         },
                         onRename = { entry, newName ->
                             store.rename(entry.dir, newName).also { entries = store.list() }

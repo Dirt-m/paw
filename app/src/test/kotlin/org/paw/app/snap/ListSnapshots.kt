@@ -5,6 +5,7 @@ import org.junit.Test
 import org.paw.app.model.ProjectStore
 import org.paw.app.ui.OptionsScreen
 import org.paw.app.ui.ProjectListScreen
+import org.paw.app.ui.SongRowMode
 import org.robolectric.annotation.Config
 import androidx.test.core.app.ApplicationProvider
 
@@ -12,7 +13,7 @@ import androidx.test.core.app.ApplicationProvider
 
 class ListSnapshots : SnapshotBase() {
 
-    private fun projectList() {
+    private fun projectList(row: Pair<String, SongRowMode>? = null) {
         val entries = listOf(
             ProjectStore.Entry("Demo Song", File("/x/Demo Song"), 1786043160000L),
             ProjectStore.Entry("Rehearsal 3 Aug", File("/x/Rehearsal 3 Aug"), 1785743160000L),
@@ -49,6 +50,7 @@ class ListSnapshots : SnapshotBase() {
                 summaries = summaries,
                 onOpen = {}, onCreate = {}, onRename = { _, _ -> true },
                 onDelete = { _, _ -> }, onOpenSettings = {},
+                initialRow = row,
             )
         }
     }
@@ -102,18 +104,39 @@ class ListSnapshots : SnapshotBase() {
     }
 
     @Test
-    fun projects_naming_portrait() {
-        val entries = listOf(
-            ProjectStore.Entry("Demo Song", File("/x/Demo Song"), 1786043160000L),
-        )
+    fun projects_empty_portrait() {
         content {
             ProjectListScreen(
-                entries = entries,
+                entries = emptyList(),
                 onOpen = {}, onCreate = {}, onRename = { _, _ -> true },
                 onDelete = { _, _ -> }, onOpenSettings = {},
-                initialNaming = true,
             )
         }
-        snap("projects-naming-portrait")
+        snap("projects-empty-portrait")
+    }
+
+    @Test
+    fun projects_row_actions_portrait() {
+        projectList("Rehearsal 3 Aug" to SongRowMode.Actions)
+        snap("projects-row-actions-portrait")
+    }
+
+    @Test
+    fun projects_delete_portrait() {
+        projectList("Rehearsal 3 Aug" to SongRowMode.Deleting)
+        snap("projects-delete-portrait")
+    }
+
+    @Test
+    @Config(qualifiers = "+land")
+    fun projects_delete_landscape() {
+        projectList("Rehearsal 3 Aug" to SongRowMode.Deleting)
+        snap("projects-delete-landscape")
+    }
+
+    @Test
+    fun projects_rename_portrait() {
+        projectList("Riff ideas" to SongRowMode.Renaming)
+        snap("projects-rename-portrait")
     }
 }

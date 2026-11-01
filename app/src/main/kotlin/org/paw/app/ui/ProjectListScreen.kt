@@ -5,7 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,30 +39,33 @@ import java.util.Locale
 import org.paw.app.model.ProjectStore
 
 // The song list. Tap a song to open it; everything else about a song lives
-// behind its own menu. The one primary action on the screen is New song.
+// behind its own menu. The one primary action on the screen is New song,
+// which makes the song and opens it straight away: naming can wait.
+
+/** What a song row shows: its facts, its actions, a rename field, or the delete choice. */
+enum class SongRowMode { Idle, Actions, Renaming, Deleting }
 
 @Composable
 fun ProjectListScreen(
     entries: List<ProjectStore.Entry>,
     summaries: Map<java.io.File, ProjectStore.Summary> = emptyMap(),
     onOpen: (ProjectStore.Entry) -> Unit,
-    onCreate: (String) -> Unit,
+    onCreate: () -> Unit,
     onRename: (ProjectStore.Entry, String) -> Boolean,
     onDelete: (ProjectStore.Entry, Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     loading: Boolean = false,
-    initialNaming: Boolean = false,
+    initialRow: Pair<String, SongRowMode>? = null,
 ) {
-    var naming by remember { mutableStateOf(initialNaming) }
-    var name by remember { mutableStateOf("") }
-
+    val empty = !loading && entries.isEmpty()
     BoxWithConstraints(Modifier.fillMaxSize().background(Colors.bg).safeDrawingPadding()) {
         val compact = maxWidth < COMPACT_WIDTH
         Column(
             Modifier
                 .fillMaxSize()
                 .widthIn(max = 720.dp)
-                .padding(if (compact) 16.dp else 24.dp),
+                .padding(horizontal = if (compact) 16.dp else 24.dp)
+                .padding(top = if (compact) 16.dp else 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -72,41 +73,25 @@ fun ProjectListScreen(
                     style = TitleStyle.copy(color = Colors.accent, fontSize = 26.sp),
                     modifier = Modifier.weight(1f),
                 )
-                if (!naming) {
-                    AppButton("Settings", accent = Colors.dim, height = 44.dp, onClick = onOpenSettings)
+                AppButton("Settings", accent = Colors.dim, height = 44.dp, onClick = onOpenSettings)
+                if (!empty) {
                     HSpace(8.dp)
                     AppButton("+  New song", accent = Colors.accent, filled = true, height = 44.dp,
-                        enabled = !loading, onClick = { naming = true })
+                        enabled = !loading, onClick = onCreate)
                 }
             }
             VSpace(16.dp)
 
-            if (naming) {
-                Column(Modifier.fillMaxWidth().panel().padding(12.dp)) {
-                    Text("Name the new song", style = NameStyle)
-                    VSpace(8.dp)
-                    NameField(name, { name = it }, Modifier.fillMaxWidth())
-                    VSpace(8.dp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AppButton("Create", accent = Colors.accent, filled = true, enabled = name.isNotBlank(), onClick = {
-                            onCreate(name.trim())
-                            naming = false
-                            name = ""
-                        })
-                        AppButton("Cancel", accent = Colors.dim, onClick = { naming = false; name = "" })
-                    }
-                }
-                VSpace(16.dp)
-            }
-
-            if (loading) {
-                Text("Moving songs to Documents/PAW…", style = DimStyle)
-            } else if (entries.isEmpty() && !naming) {
-                Text("No songs yet.", style = DimStyle)
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            when {
+                loading -> Text("Moving songs to Documents/PAW…", style = DimStyle)
+                empty -> FirstRun(onCreate, Modifier.weight(1f).fillMaxWidth())
+                else -> LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                ) {
                     items(entries, key = { it.dir.absolutePath }) { entry ->
-                        SongRow(entry, summaries[entry.dir], compact, onOpen, onRename, onDelete)
+                        val start = initialRow?.takeIf { it.first == entry.name }?.second ?: SongRowMode.Idle
+                        SongRow(entry, summaries[entry.dir], compact, start, onOpen, onRename, onDelete)
                     }
                 }
             }
@@ -114,35 +99,59 @@ fun ProjectListScreen(
     }
 }
 
-// One song row. Idle: open on tap, menu at the end. Renaming swaps the name
-// for a text field; deleting swaps the row for the choice of what happens to
-// the recordings.
+/** No songs yet: an empty arrangement and the one thing to do about it. */
+@Composable
+private fun FirstRun(onCreate: () -> Unit, modifier: Modifier) {
+    Column(
+        modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        SongThumbnail(
+            ProjectStore.Summary(
+                clips = List(4) { emptyList() }, patternTracks = emptySet(),
+                lengthFrames = 0, sampleRate = 48_000, tempoBpm = 120f,
+            ),
+            Modifier.size(width = 168.dp, height = 96.dp),
+        )
+        VSpace(20.dp)
+        Text("No songs yet", style = TitleStyle.copy(fontSize = 18.sp))
+        VSpace(20.dp)
+        AppButton(
+            "+  New song", accent = Colors.accent, filled = true, height = Dimens.touchBig,
+            fontSize = 15.sp, padding = 28.dp, onClick = onCreate,
+        )
+        // Keeps the group a little above centre, where the eye lands.
+        VSpace(64.dp)
+    }
+}
+
+// One song row. Idle: open on tap, ⋮ at the end. The ⋮ opens a row of
+// actions under the facts; renaming swaps the name for a text field;
+// deleting swaps the row for the choice of what happens to the recordings.
 @Composable
 private fun SongRow(
     entry: ProjectStore.Entry,
     summary: ProjectStore.Summary?,
     compact: Boolean,
+    initialMode: SongRowMode,
     onOpen: (ProjectStore.Entry) -> Unit,
     onRename: (ProjectStore.Entry, String) -> Boolean,
     onDelete: (ProjectStore.Entry, Boolean) -> Unit,
 ) {
-    var renaming by remember(entry.dir) { mutableStateOf<String?>(null) }
+    var mode by remember(entry.dir) { mutableStateOf(initialMode) }
+    var name by remember(entry.dir) { mutableStateOf(entry.name) }
     var nameTaken by remember(entry.dir) { mutableStateOf(false) }
-    var confirmingDelete by remember(entry.dir) { mutableStateOf(false) }
-    var menuOpen by remember(entry.dir) { mutableStateOf(false) }
-    val editing = renaming
 
     Column(
         Modifier
             .fillMaxWidth()
             .panel()
-            .let {
-                if (editing == null && !confirmingDelete) it.clickable { onOpen(entry) } else it
-            }
+            .let { if (mode == SongRowMode.Idle) it.clickable { onOpen(entry) } else it }
             .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
     ) {
-        when {
-            confirmingDelete -> {
+        when (mode) {
+            SongRowMode.Deleting -> {
                 Text(
                     "Delete “${entry.name}”?",
                     style = BodyStyle.copy(color = Colors.red),
@@ -150,40 +159,44 @@ private fun SongRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 VSpace(8.dp)
+                // Stacked in a narrow window, all one width so they read as one choice.
+                val w = if (compact) Modifier.fillMaxWidth() else Modifier
                 val buttons: @Composable () -> Unit = {
                     AppButton("Delete song and recordings", accent = Colors.red, filled = true, fontSize = 12.sp,
-                        onClick = { onDelete(entry, false) })
+                        modifier = w, onClick = { onDelete(entry, false) })
                     AppButton("Delete song, keep recordings", accent = Colors.accent, fontSize = 12.sp,
-                        onClick = { onDelete(entry, true) })
-                    AppButton("Cancel", accent = Colors.dim, fontSize = 12.sp, onClick = { confirmingDelete = false })
+                        modifier = w, onClick = { onDelete(entry, true) })
+                    AppButton("Cancel", accent = Colors.dim, fontSize = 12.sp, modifier = w,
+                        onClick = { mode = SongRowMode.Idle })
                 }
                 if (compact) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { buttons() }
+                    Column(Modifier.padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { buttons() }
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { buttons() }
                 }
             }
-            editing != null -> {
+            SongRowMode.Renaming -> {
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    NameField(editing, {
-                        renaming = it
+                    NameField(name, {
+                        name = it
                         nameTaken = false
                     }, Modifier.weight(1f))
-                    AppButton("Save", accent = Colors.accent, filled = true, enabled = editing.isNotBlank(), onClick = {
-                        if (onRename(entry, editing)) renaming = null else nameTaken = true
+                    AppButton("Save", accent = Colors.accent, filled = true, enabled = name.isNotBlank(), onClick = {
+                        if (onRename(entry, name)) mode = SongRowMode.Idle else nameTaken = true
                     })
-                    AppButton("Cancel", accent = Colors.dim, onClick = { renaming = null })
+                    AppButton("Cancel", accent = Colors.dim, onClick = { mode = SongRowMode.Idle; name = entry.name })
                 }
                 if (nameTaken) {
                     Text("A song with that name already exists", style = DimStyle.copy(color = Colors.red),
                         modifier = Modifier.padding(top = 6.dp))
                 }
             }
-            else -> {
+            SongRowMode.Idle, SongRowMode.Actions -> {
+                val open = mode == SongRowMode.Actions
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -206,18 +219,25 @@ private fun SongRow(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Box {
-                        AppButton("⋮", accent = Colors.dim, fontSize = 20.sp, onClick = { menuOpen = true })
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Rename", style = BodyStyle) },
-                                onClick = { menuOpen = false; renaming = entry.name },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Delete…", style = BodyStyle.copy(color = Colors.red)) },
-                                onClick = { menuOpen = false; confirmingDelete = true },
-                            )
-                        }
+                    IconButton(
+                        MoreGlyph,
+                        tint = if (open) Colors.accent else Colors.dim,
+                        modifier = Modifier.padding(start = 4.dp),
+                        onClick = { mode = if (open) SongRowMode.Idle else SongRowMode.Actions },
+                    )
+                }
+                if (open) {
+                    VSpace(8.dp)
+                    Row(
+                        Modifier.fillMaxWidth().padding(end = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        AppButton("Rename", onClick = { name = entry.name; mode = SongRowMode.Renaming },
+                            modifier = Modifier.weight(1f))
+                        AppButton("Delete…", accent = Colors.red, onClick = { mode = SongRowMode.Deleting },
+                            modifier = Modifier.weight(1f))
+                        AppButton("Cancel", accent = Colors.dim, onClick = { mode = SongRowMode.Idle },
+                            modifier = Modifier.weight(1f))
                     }
                 }
             }
