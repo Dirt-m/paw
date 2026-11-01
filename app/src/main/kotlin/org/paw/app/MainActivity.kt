@@ -76,6 +76,10 @@ class MainActivity : ComponentActivity() {
                 // its own controller.
                 var entries by remember { mutableStateOf(emptyList<ProjectStore.Entry>()) }
                 var songsReady by remember { mutableStateOf(false) }
+                // Held here, not in the song screen, so a visit to Settings
+                // comes back to the same mode, panel and view.
+                val songUi = remember(controller) { org.paw.app.ui.SongUi() }
+                val songTimeline = remember(controller) { org.paw.app.ui.TimelineState() }
                 // Read after the list shows, so a slow card never holds it up.
                 var summaries by remember { mutableStateOf(emptyMap<File, ProjectStore.Summary>()) }
                 LaunchedEffect(entries) {
@@ -268,6 +272,8 @@ class MainActivity : ComponentActivity() {
                             }
                             SongScreen(
                                 controller = c,
+                                ui = songUi,
+                                tl = songTimeline,
                                 onBack = {
                                     c.stop()
                                     Engine.closeStreams()

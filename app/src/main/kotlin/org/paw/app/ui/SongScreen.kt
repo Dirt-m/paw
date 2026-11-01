@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
@@ -95,13 +96,12 @@ fun SongScreen(
     onOpenSettings: () -> Unit,
     onRename: (String) -> Boolean = { false },
     ui: SongUi = remember(controller) { SongUi() },
+    tl: TimelineState = remember(controller) { TimelineState() },
 ) {
     val context = LocalContext.current
     val prefs = remember(context) { AppPrefs.of(context) }
     val savedZoom = remember(controller) { prefs.zoomFor(controller.projectDir.name) }
-    val tl = remember(controller) {
-        TimelineState().also { t -> savedZoom?.let { t.framesPerPx = it } }
-    }
+    remember(tl) { savedZoom?.let { tl.framesPerPx = it } }
     // A song opened for the first time shows all of itself, not the first
     // few seconds; an empty one shows enough room for a take.
     LaunchedEffect(tl) {
@@ -180,17 +180,21 @@ fun SongScreen(
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     // A narrow window gives the panel the whole workspace; the
                     // mode under it keeps its state for when the panel closes.
-                    if (panel == null || !compact) {
-                        when (ui.mode) {
-                            SongMode.Tracks -> {
-                                TracksView(controller, ui, tl, peaks, compact, short)
-                                PlayheadChip(controller, tl, compact)
-                            }
-                            SongMode.Mix -> MixerView(controller, ui, short)
-                            SongMode.Beats -> BeatsMode(controller, ui, compact, short)
+                    // The mode stays composed under a panel, so its scroll
+                    // position, its choices and a looping pattern survive a
+                    // visit to the inspector.
+                    when (ui.mode) {
+                        SongMode.Tracks -> {
+                            TracksView(controller, ui, tl, peaks, compact, short)
+                            PlayheadChip(controller, tl, compact)
                         }
-                    } else {
-                        PanelHost(controller, ui, tl, compact, Modifier.fillMaxSize())
+                        SongMode.Mix -> MixerView(controller, ui, short)
+                        SongMode.Beats -> BeatsMode(controller, ui, compact, short)
+                    }
+                    // A narrow window gives the panel the whole workspace;
+                    // touches stop at it instead of reaching the mode below.
+                    if (panel != null && compact) {
+                        PanelHost(controller, ui, tl, compact, Modifier.fillMaxSize().blockTouches())
                     }
                     MessageBanner(controller, Modifier.align(Alignment.BottomCenter).padding(12.dp))
                 }
@@ -208,6 +212,16 @@ fun SongScreen(
                 else ModeBar(ui, Modifier.fillMaxWidth())
             }
             TransportBar(controller, ui, tl, compact = compact, short = short)
+        }
+    }
+}
+
+/** Swallows whatever the content above it leaves, so nothing falls through. */
+private fun Modifier.blockTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Final)
+                .changes.forEach { it.consume() }
         }
     }
 }
