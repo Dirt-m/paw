@@ -8,7 +8,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// The visual language is deliberately plain. Dark, flat, one amber accent.
+// The visual language is deliberately plain. Dark, flat, one lilac accent.
 // Controls are rounded so they read as pressable; the workspace (lanes, panels,
 // lists) stays square so it reads as surface. Every tappable thing is at least
 // 40 dp tall.
@@ -27,10 +27,10 @@ object Colors {
     val line = Color(0xFF30343A)
     val text = Color(0xFFECEAE4)
     val dim = Color(0xFF8F949B)
-    val amber = Color(0xFFE8A33D)
+    val accent = Color(0xFFA496FF)
     val red = Color(0xFFE5484D)
     val green = Color(0xFF5DAF62)
-    val orange = Color(0xFFE0722B)
+    val warn = Color(0xFFE3C547)
     val clip = Color(0xFF232830)
     val wave = Color(0xFFB9C0C7)
 }

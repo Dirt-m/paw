@@ -92,7 +92,7 @@ fun MixerView(
                 ) {
                     Text(
                         "+\nAdd\ntrack",
-                        style = ButtonStyle.copy(color = Colors.amber, lineHeight = 20.sp),
+                        style = ButtonStyle.copy(color = Colors.accent, lineHeight = 20.sp),
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -180,7 +180,7 @@ private fun TrackButtons(
     val monitor: @Composable (Modifier) -> Unit =
         if (track.kind == TRACK_BEAT) { m -> Box(m) } else { m -> MonitorToggle(track, controller, size, m) }
     val mute: @Composable (Modifier) -> Unit = { m ->
-        Toggle("M", track.mute, Colors.amber, size = size, modifier = m, onClick = {
+        Toggle("M", track.mute, Colors.accent, size = size, modifier = m, onClick = {
             controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
         })
     }
@@ -294,15 +294,15 @@ private fun MasterStrip(
 ) {
     val master = controller.song.master
     val mute = @Composable {
-        Toggle("M", master.mute, Colors.amber, size = 36.dp, modifier = Modifier.fillMaxWidth(), onClick = {
+        Toggle("M", master.mute, Colors.accent, size = 36.dp, modifier = Modifier.fillMaxWidth(), onClick = {
             controller.updateTrack(MASTER_TRACK_ID) { it.copy(mute = !it.mute) }
         })
     }
     Box(Modifier.padding(STRIP_GAP)) {
-        StripFrame(width - STRIP_GAP * 2, Colors.amber.copy(alpha = 0.5f)) {
+        StripFrame(width - STRIP_GAP * 2, Colors.accent.copy(alpha = 0.5f)) {
             // The portrait master strip is too narrow for its name and FX
             // both; the name row opens the same screen.
-            StripName("Master", Colors.amber, showFx = short) { onOpenTrack(MASTER_TRACK_ID) }
+            StripName("Master", Colors.accent, showFx = short) { onOpenTrack(MASTER_TRACK_ID) }
             if (short) {
                 Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FaderBlock(controller, MASTER_TRACK_ID, master.gain, Modifier.fillMaxHeight())

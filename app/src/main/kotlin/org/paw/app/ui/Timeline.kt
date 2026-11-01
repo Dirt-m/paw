@@ -80,6 +80,14 @@ class TimelineState {
         return laneWidthPx > 0f && (px < 0f || px > laneWidthPx)
     }
 
+    /** Show [frames] from the start across the whole lane width, with a
+     *  little room after the end so the last clip's edge is grabbable. */
+    fun fitTo(frames: Long) {
+        if (laneWidthPx <= 0f) return
+        framesPerPx = (frames * 1.06f / laneWidthPx).coerceIn(20f, 24000f)
+        originFrame = 0L
+    }
+
     /** Bring [frame] to a fifth of the way in from the left. */
     fun showFrame(frame: Long) {
         if (laneWidthPx <= 0f) return
@@ -327,9 +335,9 @@ fun Ruler(
         drawLine(Colors.line, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f))
         val px = tl.pxOf(controller.playheadFrame)
         if (px in 0f..size.width) {
-            drawLine(Colors.amber, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
+            drawLine(Colors.accent, Offset(px, 0f), Offset(px, size.height), strokeWidth = 3f)
             val w = 5.dp.toPx()
-            drawRect(Colors.amber, Offset(px - w, 0f), Size(2 * w, 4.dp.toPx()))
+            drawRect(Colors.accent, Offset(px - w, 0f), Size(2 * w, 4.dp.toPx()))
         }
     }
 }
@@ -354,6 +362,108 @@ fun DrawScope.drawGrid(tl: TimelineState, sampleRate: Int) {
         f += step
     }
     drawLine(Colors.line, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f))
+}
+
+// ----------------------------------------------------------------- overview --
+
+/**
+ * The whole song in one strip: a row per track with its clips, the loop, the
+ * playhead, and a frame around the part the lanes show. A touch moves that
+ * frame to the finger, so any point in the song is one drag away at any zoom.
+ */
+@Composable
+fun Overview(
+    tl: TimelineState,
+    controller: SongController,
+    modifier: Modifier = Modifier,
+) {
+    val song = controller.song
+    val sr = song.sampleRate
+
+    // The strip spans the song plus whatever the view or the playhead has
+    // reached past it, and never less than ten seconds. Reads the controller,
+    // not [song], because the gesture outlives the composition it began in.
+    fun spanFrames(widthPx: Float): Long = maxOf(
+        controller.song.endFrame,
+        controller.song.loopEnd,
+        controller.playheadFrame,
+        tl.frameAt(tl.laneWidthPx.takeIf { it > 0f } ?: widthPx),
+        10L * sr,
+    ).let { (it * 1.04).toLong() }
+
+    Canvas(
+        modifier
+            .clipToBounds()
+            .background(Colors.bg)
+            .onSizeChanged { if (tl.laneWidthPx <= 0f) tl.laneWidthPx = it.width.toFloat() }
+            .pointerInput(tl) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val span = spanFrames(size.width.toFloat())
+                    fun center(x: Float) {
+                        val visible = (tl.laneWidthPx * tl.framesPerPx).toLong()
+                        val f = (x / size.width * span).toLong()
+                        tl.originFrame = (f - visible / 2).coerceAtLeast(0L)
+                        releaseFollow(tl, controller)
+                    }
+                    center(down.position.x)
+                    down.consume()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        change.consume()
+                        center(change.position.x)
+                    }
+                }
+            },
+    ) {
+        val span = spanFrames(size.width).toFloat()
+        fun x(frame: Long) = frame / span * size.width
+
+        if (song.loopEnd > song.loopStart) {
+            drawRect(
+                Colors.green.copy(alpha = if (song.loopEnabled) 0.22f else 0.08f),
+                topLeft = Offset(x(song.loopStart), 0f),
+                size = Size(x(song.loopEnd) - x(song.loopStart), size.height),
+            )
+        }
+
+        val pad = 3.dp.toPx()
+        val n = song.tracks.size.coerceAtLeast(1)
+        val rowH = ((size.height - 2 * pad) / n).coerceAtMost(6.dp.toPx())
+        val top0 = (size.height - rowH * n) / 2f
+        song.tracks.forEachIndexed { i, t ->
+            val y = top0 + i * rowH
+            for (c in t.clips) {
+                drawRect(
+                    if (c.isPattern) Colors.accent.copy(alpha = 0.7f) else Colors.wave.copy(alpha = 0.6f),
+                    topLeft = Offset(x(c.start), y + rowH * 0.15f),
+                    size = Size((x(c.end) - x(c.start)).coerceAtLeast(1.5f), rowH * 0.7f),
+                )
+            }
+        }
+
+        // The window the lanes show.
+        if (tl.laneWidthPx > 0f) {
+            val x0 = x(tl.originFrame)
+            val x1 = x(tl.frameAt(tl.laneWidthPx)).coerceAtMost(size.width - 1f)
+            drawRect(
+                Colors.text.copy(alpha = 0.07f),
+                topLeft = Offset(x0, 0f),
+                size = Size((x1 - x0).coerceAtLeast(3f), size.height),
+            )
+            drawRect(
+                Colors.text.copy(alpha = 0.55f),
+                topLeft = Offset(x0, 1f),
+                size = Size((x1 - x0).coerceAtLeast(3f), size.height - 2f),
+                style = Stroke(1.dp.toPx()),
+            )
+        }
+        val ph = x(controller.playheadFrame)
+        drawLine(Colors.accent, Offset(ph, 0f), Offset(ph, size.height), strokeWidth = 2.dp.toPx())
+        drawLine(Colors.line, Offset(0f, size.height - 1f), Offset(size.width, size.height - 1f))
+    }
 }
 
 // -------------------------------------------------------------------- lanes --
@@ -589,7 +699,7 @@ fun ClipLane(
 
             drawRect(
                 when {
-                    isSel -> Colors.amber.copy(alpha = 0.12f)
+                    isSel -> Colors.accent.copy(alpha = 0.12f)
                     clip.isPattern -> Colors.green.copy(alpha = 0.10f)
                     else -> Colors.clip
                 },
@@ -627,7 +737,7 @@ fun ClipLane(
             }
 
             drawRect(
-                if (isSel) Colors.amber else Colors.line,
+                if (isSel) Colors.accent else Colors.line,
                 topLeft = Offset(x0, top),
                 size = Size(x1 - x0, bot - top),
                 style = Stroke(if (isSel) 2.5f else 1.5f),
@@ -641,7 +751,7 @@ fun ClipLane(
                 val gripInset = 2.5.dp.toPx()
                 for (x in floatArrayOf(x0, x1)) {
                     drawRoundRect(
-                        Colors.amber,
+                        Colors.accent,
                         topLeft = Offset(x - hw, cy - hh),
                         size = Size(2 * hw, 2 * hh),
                         cornerRadius = CornerRadius(hw),
@@ -684,7 +794,7 @@ fun ClipLane(
 
         val px = tl.pxOf(controller.playheadFrame)
         if (px in 0f..size.width) {
-            drawLine(Colors.amber, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
+            drawLine(Colors.accent, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
         }
     }
 }
@@ -745,7 +855,7 @@ private fun DrawScope.drawPatternClip(
             if (f > visEnd) break
             if (f >= visStart - len) {
                 val x = tl.pxOf(f)
-                drawRect(Colors.amber.copy(alpha = 0.85f), Offset(x, y + 1f), Size(markW, (rowH - 2f).coerceAtLeast(1f)))
+                drawRect(Colors.accent.copy(alpha = 0.85f), Offset(x, y + 1f), Size(markW, (rowH - 2f).coerceAtLeast(1f)))
             }
             pos += len
         }

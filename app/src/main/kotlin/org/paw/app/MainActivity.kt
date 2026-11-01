@@ -84,6 +84,13 @@ class MainActivity : ComponentActivity() {
                 // its own controller.
                 var entries by remember { mutableStateOf(emptyList<ProjectStore.Entry>()) }
                 var songsReady by remember { mutableStateOf(false) }
+                // Read after the list shows, so a slow card never holds it up.
+                var summaries by remember { mutableStateOf(emptyMap<File, ProjectStore.Summary>()) }
+                LaunchedEffect(entries) {
+                    summaries = withContext(Dispatchers.IO) {
+                        entries.mapNotNull { e -> store.summary(e.dir)?.let { e.dir to it } }.toMap()
+                    }
+                }
                 LaunchedEffect(Unit) {
                     val failed = withContext(Dispatchers.IO) { store.migrate() }
                     entries = store.list()
@@ -234,6 +241,7 @@ class MainActivity : ComponentActivity() {
                 when (val here = nav) {
                     Nav.Projects -> ProjectListScreen(
                         entries = entries,
+                        summaries = summaries,
                         loading = !songsReady,
                         onOpen = { openSong(it.dir) },
                         onCreate = { name ->

@@ -25,6 +25,27 @@ class ProjectStore(
 
     data class Entry(val name: String, val dir: File, val lastModified: Long)
 
+    /** What the song list shows of a song without opening it: each track's
+     *  clips as (start, end) frames, the length and the tempo. */
+    data class Summary(
+        val clips: List<List<Pair<Long, Long>>>,
+        val patternTracks: Set<Int>,
+        val lengthFrames: Long,
+        val sampleRate: Int,
+        val tempoBpm: Float,
+    )
+
+    /** Reads the manifest; null when it cannot be read. Call off the UI thread. */
+    fun summary(dir: File): Summary? = load(dir)?.let { song ->
+        Summary(
+            clips = song.tracks.map { t -> t.clips.map { it.start to it.end } },
+            patternTracks = song.tracks.indices.filterTo(mutableSetOf()) { song.tracks[it].kind == TRACK_BEAT },
+            lengthFrames = song.endFrame,
+            sampleRate = song.sampleRate,
+            tempoBpm = song.tempoBpm,
+        )
+    }
+
     private fun songDirs(parent: File): Array<File> =
         // A song whose main manifest is mid-rotation (or torn) still lists via
         // its .bak; load() recovers from the same file.

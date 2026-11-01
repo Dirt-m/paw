@@ -74,7 +74,7 @@ fun TrackDetailScreen(
                     title = track.name,
                     onBack = onBack,
                     backLabel = "Song",
-                    titleColor = if (isMaster) Colors.amber else Colors.text,
+                    titleColor = if (isMaster) Colors.accent else Colors.text,
                 ) {
                     if (!isMaster) {
                         AppButton("Rename", accent = Colors.dim, onClick = { editingName = track.name })
@@ -87,7 +87,7 @@ fun TrackDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     NameField(editing, { editingName = it }, Modifier.weight(1f), maxLength = 24)
-                    AppButton("Save", accent = Colors.amber, filled = true, enabled = editing.isNotBlank(), onClick = {
+                    AppButton("Save", accent = Colors.accent, filled = true, enabled = editing.isNotBlank(), onClick = {
                         controller.renameTrack(trackId, editing)
                         editingName = null
                     })
@@ -340,7 +340,7 @@ private fun EffectsSection(
                 AppButton(
                     "+  Add effect",
                     onClick = { onPicking(true) },
-                    accent = Colors.amber,
+                    accent = Colors.accent,
                     filled = track.effects.isEmpty(),
                     modifier = Modifier.fillMaxWidth(),
                     height = 44.dp,
@@ -398,7 +398,7 @@ private fun PickRow(plugin: PluginInfo, onPick: (PluginInfo) -> Unit) {
         )
         Text(if (plugin.stereo) "stereo" else "mono", style = MonoDimStyle)
         HSpace(10.dp)
-        Text("+", style = TitleStyle.copy(color = Colors.amber))
+        Text("+", style = TitleStyle.copy(color = Colors.accent))
     }
 }
 
