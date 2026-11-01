@@ -37,7 +37,15 @@ int VoicePool::sounding() const {
     return n;
 }
 
-void VoicePool::start(int index, float velocity) {
+void VoicePool::startHits(const HitList& list, int64_t from, int frames, int burstOffset) {
+    const auto& h = list.hits;
+    auto it = std::lower_bound(h.begin(), h.end(), from,
+                               [](const SampleHit& a, int64_t f) { return a.frame < f; });
+    for (; it != h.end() && it->frame < from + frames; ++it)
+        start(it->sample, it->velocity, static_cast<int>(it->frame - from) + burstOffset);
+}
+
+void VoicePool::start(int index, float velocity, int delay) {
     if (!mBank || index < 0 || index >= static_cast<int>(mBank->samples.size())) return;
 
     // Too many sounding: fade the oldest one out under the new one.
@@ -62,12 +70,22 @@ void VoicePool::start(int index, float velocity) {
     }
     slot->sample = index;
     slot->pos = 0;
+    slot->delay = std::max(0, delay);
     slot->gain = std::clamp(velocity, 0.0f, 1.0f);
     slot->fadeLeft = -1;
     slot->order = mNextOrder++;
 }
 
 void VoicePool::renderVoice(Voice& v, int frames, float* dst) {
+    if (v.delay >= frames) {
+        v.delay -= frames;
+        return;
+    }
+    if (v.delay > 0) {
+        frames -= v.delay;
+        if (dst) dst += 2 * v.delay;
+        v.delay = 0;
+    }
     const Sample& s = mBank->samples[v.sample];
     int n = static_cast<int>(std::min<int64_t>(frames, s.frames - v.pos));
     if (v.fadeLeft >= 0) n = std::min(n, v.fadeLeft);

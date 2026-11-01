@@ -393,6 +393,21 @@ class ScreenSnapshots {
     }
 
     @Test
+    fun track_beat_portrait() {
+        trackDetail(5)
+        snap("track-beat-portrait")
+    }
+
+    /** The beat track's pattern clip selected: Edit instead of Sample. */
+    @Test
+    fun song_pattern_selected_portrait() {
+        val c = controller()
+        c.selectedClip = 5 to 5
+        songWith(c)
+        snap("song-pattern-selected-portrait")
+    }
+
+    @Test
     fun track_mic_portrait() {
         val c = controller()
         content { TrackDetailScreen(controller = c, trackId = 4, onBack = {}) }
@@ -433,7 +448,7 @@ class ScreenSnapshots {
     @Test
     fun sampler_portrait() {
         val c = controller()
-        content { org.paw.app.ui.SamplerScreen(controller = c, onBack = {}) }
+        content { org.paw.app.ui.SamplerScreen(controller = c, trackId = 5, initialPattern = 1, onBack = {}) }
         snap("sampler-portrait")
     }
 
@@ -441,7 +456,7 @@ class ScreenSnapshots {
     @Config(qualifiers = "+land")
     fun sampler_landscape() {
         val c = controller()
-        content { org.paw.app.ui.SamplerScreen(controller = c, onBack = {}) }
+        content { org.paw.app.ui.SamplerScreen(controller = c, trackId = 5, initialPattern = 1, onBack = {}) }
         snap("sampler-landscape")
     }
 

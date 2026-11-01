@@ -66,6 +66,7 @@ import org.paw.app.model.INPUT_NONE
 import org.paw.app.model.INPUT_STEREO
 import org.paw.app.model.MASTER_TRACK_ID
 import org.paw.app.model.MIN_CLIP_FRAMES
+import org.paw.app.model.TRACK_BEAT
 import org.paw.app.model.InputDevice
 import org.paw.app.model.Track
 
@@ -88,7 +89,7 @@ fun SongScreen(
     onOpenTakes: () -> Unit,
     onOpenOptions: () -> Unit,
     onOpenMetronome: () -> Unit,
-    onOpenSampler: () -> Unit = {},
+    onOpenSampler: (trackId: Int, patternId: Int?) -> Unit = { _, _ -> },
     initialView: SongView = SongView.Tracks,
 ) {
     val context = LocalContext.current
@@ -159,14 +160,14 @@ fun SongScreen(
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (view) {
-                    SongView.Tracks -> TracksView(controller, tl, peaks, onOpenTrack, compact, short)
+                    SongView.Tracks -> TracksView(controller, tl, peaks, onOpenTrack, onOpenSampler, compact, short)
                     SongView.Mix -> MixerView(controller, onOpenTrack, short)
                 }
                 if (view == SongView.Tracks) PlayheadChip(controller, tl, compact)
                 MessageBanner(controller, Modifier.align(Alignment.BottomCenter).padding(12.dp))
             }
 
-            if (view == SongView.Tracks) SelectionBar(controller, compact)
+            if (view == SongView.Tracks) SelectionBar(controller, compact, onOpenSampler)
             TransportBar(controller, tl, compact = compact, short = short)
         }
     }
@@ -184,7 +185,7 @@ private fun SongTopBar(
     onOpenTakes: () -> Unit,
     onOpenOptions: () -> Unit,
     onOpenMetronome: () -> Unit,
-    onOpenSampler: () -> Unit,
+    onOpenSampler: (trackId: Int, patternId: Int?) -> Unit,
     compact: Boolean,
 ) {
     val song = controller.song
@@ -222,7 +223,7 @@ private fun SongTopBar(
                 )
                 DropdownMenuItem(
                     text = { Text("Sampler", style = BodyStyle) },
-                    onClick = { menuOpen = false; onOpenSampler() },
+                    onClick = { menuOpen = false; onOpenSampler(controller.beatTrackForSampler(), null) },
                 )
                 DropdownMenuItem(
                     text = {
@@ -307,6 +308,7 @@ private fun TracksView(
     tl: TimelineState,
     peaks: Map<String, PeakData>,
     onOpenTrack: (Int) -> Unit,
+    onOpenSampler: (trackId: Int, patternId: Int?) -> Unit,
     compact: Boolean,
     short: Boolean,
 ) {
@@ -355,7 +357,7 @@ private fun TracksView(
                     key(track.id) {
                         Row(Modifier.fillMaxWidth().height(laneH)) {
                             TrackHeader(
-                                track, controller, onOpenTrack, compact = compact, short = short,
+                                track, controller, onOpenTrack, onOpenSampler, compact = compact, short = short,
                                 modifier = Modifier.width(headerW).fillMaxHeight(),
                             )
                             ClipLane(
@@ -367,20 +369,22 @@ private fun TracksView(
                     }
                 }
                 // New tracks are made where the tracks live.
-                Row(
-                    Modifier
-                        .width(headerW)
-                        .height(48.dp)
-                        .background(Colors.panel)
-                        .clickable { controller.addTrack() }
-                        .padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "+  Add track",
-                        style = ButtonStyle.copy(color = Colors.amber),
-                        maxLines = 1,
-                    )
+                for ((label, add) in listOf<Pair<String, () -> Unit>>(
+                    "+  Add track" to { controller.addTrack() },
+                    "+  Add beat track" to { controller.addBeatTrack() },
+                )) {
+                    Row(
+                        Modifier
+                            .width(headerW)
+                            .height(48.dp)
+                            .background(Colors.panel)
+                            .border(1.dp, Colors.line)
+                            .clickable(onClick = add)
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(label, style = ButtonStyle.copy(color = Colors.amber), maxLines = 1)
+                    }
                 }
             }
         }
@@ -397,6 +401,7 @@ private fun TrackHeader(
     track: Track,
     controller: SongController,
     onOpenTrack: (Int) -> Unit,
+    onOpenSampler: (trackId: Int, patternId: Int?) -> Unit,
     compact: Boolean,
     short: Boolean,
     modifier: Modifier = Modifier,
@@ -432,10 +437,20 @@ private fun TrackHeader(
             FxChip { onOpenTrack(track.id) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Toggle("●", track.armed, Colors.red, size = btn, fontSize = 14.sp, modifier = Modifier.weight(1f), onClick = {
-                controller.updateTrack(track.id) { it.copy(armed = !it.armed) }
-            })
-            MonitorToggle(track, controller, btn, Modifier.weight(1f))
+            if (track.kind == TRACK_BEAT) {
+                // A beat track has no input to arm or monitor; its two slots
+                // open the sampler instead.
+                AppButton(
+                    "Grid", onClick = { onOpenSampler(track.id, null) },
+                    accent = Colors.amber, height = btn, fontSize = 12.sp,
+                    modifier = Modifier.weight(2f),
+                )
+            } else {
+                Toggle("●", track.armed, Colors.red, size = btn, fontSize = 14.sp, modifier = Modifier.weight(1f), onClick = {
+                    controller.updateTrack(track.id) { it.copy(armed = !it.armed) }
+                })
+                MonitorToggle(track, controller, btn, Modifier.weight(1f))
+            }
             Toggle("M", track.mute, Colors.amber, size = btn, modifier = Modifier.weight(1f), onClick = {
                 controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
             })
@@ -572,7 +587,11 @@ private fun SplitButton(controller: SongController, trackId: Int, clip: Clip, mo
 
 /** Actions for the selected clip. Only exists while something is selected. */
 @Composable
-private fun SelectionBar(controller: SongController, compact: Boolean) {
+private fun SelectionBar(
+    controller: SongController,
+    compact: Boolean,
+    onOpenSampler: (trackId: Int, patternId: Int?) -> Unit,
+) {
     val sel = controller.selectedClip ?: return
     val song = controller.song
     val (trackId, clipId) = sel
@@ -590,15 +609,23 @@ private fun SelectionBar(controller: SongController, compact: Boolean) {
     ) {
         if (!compact) {
             Text(
-                "CLIP  ·  ${formatTime(clip.length, song.sampleRate)}",
+                "${if (clip.isPattern) "PATTERN" else "CLIP"}  ·  ${formatTime(clip.length, song.sampleRate)}",
                 style = LabelStyle.copy(color = Colors.amber),
                 modifier = Modifier.padding(horizontal = 6.dp),
                 maxLines = 1,
             )
         }
+        if (clip.isPattern) {
+            AppButton("Edit", accent = Colors.amber, fontSize = 12.sp, modifier = Modifier.weight(1f),
+                onClick = { onOpenSampler(trackId, clip.pattern) })
+        } else {
+            // Turns the clip's slice into a sample on a beat track.
+            AppButton("Sample", accent = Colors.amber, fontSize = 12.sp, modifier = Modifier.weight(1.2f),
+                onClick = { controller.sampleFromClip(trackId, clipId) })
+        }
         SplitButton(controller, trackId, clip, Modifier.weight(1.1f))
-        AppButton("Duplicate", onClick = { controller.duplicateClip(trackId, clipId) },
-            modifier = Modifier.weight(1.4f), fontSize = 12.sp)
+        AppButton(if (compact) "Dup" else "Duplicate", onClick = { controller.duplicateClip(trackId, clipId) },
+            modifier = Modifier.weight(if (compact) 1f else 1.4f), fontSize = 12.sp)
         AppButton("▲", enabled = trackIdx > 0, fontSize = 12.sp,
             onClick = { controller.moveClipToTrack(trackId, clipId, -1) })
         AppButton("▼", enabled = trackIdx in 0 until song.tracks.size - 1, fontSize = 12.sp,

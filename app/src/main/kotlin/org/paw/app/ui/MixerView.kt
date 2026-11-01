@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import org.paw.app.SongController
 import org.paw.app.model.MASTER_TRACK_ID
 import org.paw.app.model.Track
+import org.paw.app.model.TRACK_BEAT
 
 // MIX view: one channel strip per track, master pinned on the right. Strip
 // widths are computed so a whole number of strips fills the space beside the
@@ -169,12 +170,15 @@ private fun TrackButtons(
     // Stacked buttons stretch to share the column, so they may be shorter
     // than a free-standing one.
     val size = if (column) 26.dp else 36.dp
-    val arm: @Composable (Modifier) -> Unit = { m ->
+    // A beat track has no input: its arm and monitor slots stay empty, so the
+    // strip keeps the same shape as its neighbours.
+    val arm: @Composable (Modifier) -> Unit = if (track.kind == TRACK_BEAT) { m -> Box(m) } else { m ->
         Toggle("●", track.armed, Colors.red, fontSize = 14.sp, size = size, modifier = m, onClick = {
             controller.updateTrack(track.id) { it.copy(armed = !it.armed) }
         })
     }
-    val monitor: @Composable (Modifier) -> Unit = { m -> MonitorToggle(track, controller, size, m) }
+    val monitor: @Composable (Modifier) -> Unit =
+        if (track.kind == TRACK_BEAT) { m -> Box(m) } else { m -> MonitorToggle(track, controller, size, m) }
     val mute: @Composable (Modifier) -> Unit = { m ->
         Toggle("M", track.mute, Colors.amber, size = size, modifier = m, onClick = {
             controller.updateTrack(track.id) { it.copy(mute = !it.mute) }

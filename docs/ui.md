@@ -30,8 +30,8 @@ whether the recordings go with the song or stay on disk.
   master meter runs along the top edge of the transport and turns red at the far right
   when the mix clips.
 
-When a clip is selected, a row of clip actions (Split, Duplicate, move up or down a
-track, Delete) appears between the workspace and the transport. It exists only while
+When a clip is selected, a row of clip actions (Sample for an audio clip or Edit for a
+pattern clip, then Split, Duplicate, move up or down a track, Delete) appears between the workspace and the transport. It exists only while
 something is selected, so it can never be mistaken for a permanent control.
 
 **Tracks (timeline).** Each lane has a header with the track name, an FX button, arm,
@@ -40,7 +40,9 @@ so does the rest of the header, so a near miss still lands there. Monitor sits o
 row rather than on the track screen because it gets switched while playing. Armed tracks show their input source next to the name
 (DUO 1, MIC), which is the moment that information matters. Volume is not in the
 header: at phone width a header fader is 90 dp long and imprecise, and it crowds
-everything else. Add track is a labelled row under the last lane.
+everything else. Add track and Add beat track are labelled rows under the last lane.
+A beat track's header has Grid where arm and monitor would be, and its lane draws
+pattern clips as their name, a mark per hit and a line where each repeat starts.
 
 The ruler seeks on tap. The loop region is drawn as a green band with a tab at each
 end; drag a tab to resize it. Hold and drag anywhere on the ruler to paint a new one.
@@ -76,10 +78,15 @@ and a small Remove. Add effect is a full-width button under the chain; it opens 
 plugin list in place. Remove track is the last thing on the screen and confirms inline.
 Rename is a button in the top bar. Wide windows put level and input beside the chain.
 
-**Sampler.** A grid of large tiles, one per sample, about three across a portrait
-phone, with Play/Stop in the top bar so samples can be played against the song. A tile
-fires on touch down, not on release, and each tile takes its own finger. It lights
-while held. For now every clip on the timeline is a sample, named after its track.
+**Sampler.** Opened from a beat track's Grid button, from Edit on a selected pattern
+clip, or from the song menu. The top bar names the beat track and has Play/Stop, which
+loops the pattern on its own. Under it, the song's patterns as a row of chips with New
+and Copy, then the pattern's time signature (beat count and unit), its bars and steps
+per beat, and its groupings when there is more than one. Then the grid: the samples
+down the left as tiles, which sound on touch down and take one finger each, and a row
+of steps beside each, tapped on and off. Groups are shaded in turn and bars carry the
+strongest line. Place at playhead runs along the bottom. In landscape the pattern
+controls move to a column on the left so the grid keeps its height.
 
 **Master.** The same screen with Output (Automatic, showing what it resolves to, then
 every connected playback endpoint) where Input would be, and no pan.

@@ -26,8 +26,14 @@ data class Clip(
     val start: Long,       // timeline frame
     val fadeIn: Long = 0,  // linear edge fades, frames; 0 = none
     val fadeOut: Long = 0,
+    // A pattern clip plays Song.patterns[pattern] on a beat track instead of a
+    // take, and take is "". srcStart is then the offset into the pattern, which
+    // repeats for as long as the clip runs, so trim, split and duplicate keep
+    // working on the same arithmetic as audio clips.
+    val pattern: Int? = null,
 ) {
     val end: Long get() = start + length
+    val isPattern: Boolean get() = pattern != null
 }
 
 // The clip edit clamps live on the data because the lane's drag preview and
@@ -70,9 +76,78 @@ data class Effect(
     val mix: Float = 1f,       // wet/dry: 1 = fully wet
 )
 
+const val TRACK_AUDIO = 0
+const val TRACK_BEAT = 1
+
+/** A slice of a take that a beat track plays from memory. */
+data class Sample(
+    val id: Int,
+    val name: String,
+    val take: String,
+    val srcStart: Long,
+    val length: Long,
+    val gain: Float = 1f,  // linear
+)
+
+/** Quarter-note resolution of pattern positions. */
+const val TICKS_PER_QUARTER = 960
+
+data class Hit(
+    val sample: Int,  // Sample.id on the track the pattern plays on
+    val tick: Int,    // from the pattern start
+    val velocity: Float = 1f,
+)
+
+/**
+ * A pattern has its own time signature: [beats] of [unit] (4 = quarter,
+ * 8 = eighth, 16 = sixteenth) per bar, felt in [grouping] (2+2+3 for 7/8), with
+ * [stepsPerBeat] grid steps per beat. Positions are ticks, so a pattern keeps
+ * its shape when the tempo changes.
+ */
+data class Pattern(
+    val id: Int,
+    val name: String,
+    val beats: Int = 4,
+    val unit: Int = 4,
+    val grouping: List<Int> = listOf(4),
+    val bars: Int = 1,
+    val stepsPerBeat: Int = 4,
+    val hits: List<Hit> = emptyList(),
+) {
+    val ticksPerBeat: Int get() = TICKS_PER_QUARTER * 4 / unit
+    val ticksPerBar: Int get() = ticksPerBeat * beats
+    val lengthTicks: Int get() = ticksPerBar * bars
+    val ticksPerStep: Int get() = ticksPerBeat / stepsPerBeat
+    val steps: Int get() = lengthTicks / ticksPerStep
+}
+
+/** The default grouping for a beat count: twos and threes, threes last. */
+fun defaultGrouping(beats: Int): List<Int> = when {
+    beats <= 4 -> listOf(beats)
+    beats % 2 == 0 && beats % 3 != 0 -> List(beats / 2) { 2 }
+    beats % 3 == 0 -> List(beats / 3) { 3 }
+    else -> List((beats - 3) / 2) { 2 } + 3
+}
+
+/** Every way to split [beats] into twos and threes, the default first. */
+fun groupingsFor(beats: Int): List<List<Int>> {
+    if (beats < 5) return listOf(listOf(beats))
+    val out = mutableListOf<List<Int>>()
+    fun walk(left: Int, acc: List<Int>) {
+        if (left == 0) { out += acc; return }
+        if (left >= 2) walk(left - 2, acc + 2)
+        if (left >= 3) walk(left - 3, acc + 3)
+    }
+    walk(beats, emptyList())
+    val d = defaultGrouping(beats)
+    return listOf(d) + out.filter { it != d }.take(5)
+}
+
 data class Track(
     val id: Int,
     val name: String,
+    val kind: Int = TRACK_AUDIO,
+    val samples: List<Sample> = emptyList(),  // beat tracks only
     val gain: Float = 1f,      // linear
     val pan: Float = 0f,       // -1..1
     val mute: Boolean = false,
@@ -92,6 +167,9 @@ data class Song(
     val master: Track = Track(id = MASTER_TRACK_ID, name = "Master", inputMode = INPUT_NONE),
     val nextTrackId: Int = 1,
     val nextClipId: Int = 1,
+    val patterns: List<Pattern> = emptyList(),
+    val nextPatternId: Int = 1,
+    val nextSampleId: Int = 1,
     val tempoBpm: Float = 120f,     // metronome grid; frame 0 = beat 1
     val beatsPerBar: Int = 4,
     val loopStart: Long = 0,        // frames; loop plays [loopStart, loopEnd)
@@ -103,6 +181,12 @@ data class Song(
 ) {
     val endFrame: Long
         get() = tracks.maxOfOrNull { t -> t.clips.maxOfOrNull { it.end } ?: 0L } ?: 0L
+
+    fun pattern(id: Int?): Pattern? = patterns.find { it.id == id }
+
+    val framesPerTick: Double get() = sampleRate * 60.0 / tempoBpm / TICKS_PER_QUARTER
+
+    fun framesOf(ticks: Int): Long = Math.round(ticks * framesPerTick)
 
     fun track(id: Int): Track? = if (id == MASTER_TRACK_ID) master else tracks.find { it.id == id }
 
@@ -128,11 +212,40 @@ private fun Clip.toJson() = JSONObject().apply {
     put("start", start)
     if (fadeIn > 0) put("fadeIn", fadeIn)
     if (fadeOut > 0) put("fadeOut", fadeOut)
+    pattern?.let { put("pattern", it) }
+}
+
+private fun Sample.toJson() = JSONObject().apply {
+    put("id", id)
+    put("name", name)
+    put("take", take)
+    put("srcStart", srcStart)
+    put("length", length)
+    put("gain", gain.toDouble())
+}
+
+private fun Pattern.toJson() = JSONObject().apply {
+    put("id", id)
+    put("name", name)
+    put("beats", beats)
+    put("unit", unit)
+    put("grouping", JSONArray(grouping))
+    put("bars", bars)
+    put("stepsPerBeat", stepsPerBeat)
+    put("hits", JSONArray(hits.map {
+        JSONObject().apply {
+            put("sample", it.sample)
+            put("tick", it.tick)
+            put("velocity", it.velocity.toDouble())
+        }
+    }))
 }
 
 private fun Track.toJson() = JSONObject().apply {
     put("id", id)
     put("name", name)
+    if (kind != TRACK_AUDIO) put("kind", kind)
+    if (samples.isNotEmpty()) put("samples", JSONArray(samples.map { it.toJson() }))
     put("gain", gain.toDouble())
     put("pan", pan.toDouble())
     put("mute", mute)
@@ -153,6 +266,9 @@ fun Song.toJson(): JSONObject = JSONObject().apply {
     put("master", master.toJson())
     put("nextTrackId", nextTrackId)
     put("nextClipId", nextClipId)
+    put("patterns", JSONArray(patterns.map { it.toJson() }))
+    put("nextPatternId", nextPatternId)
+    put("nextSampleId", nextSampleId)
     put("tempoBpm", tempoBpm.toDouble())
     put("beatsPerBar", beatsPerBar)
     put("loopStart", loopStart)
@@ -183,14 +299,46 @@ private fun clipFromJson(o: JSONObject) = Clip(
     start = o.getLong("start"),
     fadeIn = o.optLong("fadeIn", 0),
     fadeOut = o.optLong("fadeOut", 0),
+    pattern = if (o.has("pattern")) o.getInt("pattern") else null,
 )
+
+private fun sampleFromJson(o: JSONObject) = Sample(
+    id = o.getInt("id"),
+    name = o.getString("name"),
+    take = o.getString("take"),
+    srcStart = o.getLong("srcStart"),
+    length = o.getLong("length"),
+    gain = o.optDouble("gain", 1.0).toFloat(),
+)
+
+private fun patternFromJson(o: JSONObject): Pattern {
+    val grouping = o.getJSONArray("grouping")
+    val hits = o.getJSONArray("hits")
+    return Pattern(
+        id = o.getInt("id"),
+        name = o.getString("name"),
+        beats = o.getInt("beats"),
+        unit = o.getInt("unit"),
+        grouping = (0 until grouping.length()).map { grouping.getInt(it) },
+        bars = o.getInt("bars"),
+        stepsPerBeat = o.getInt("stepsPerBeat"),
+        hits = (0 until hits.length()).map {
+            val h = hits.getJSONObject(it)
+            Hit(h.getInt("sample"), h.getInt("tick"), h.optDouble("velocity", 1.0).toFloat())
+        },
+    )
+}
 
 private fun trackFromJson(o: JSONObject): Track {
     val clips = o.getJSONArray("clips")
     val effects = o.getJSONArray("effects")
+    val samples = o.optJSONArray("samples")
     return Track(
         id = o.getInt("id"),
         name = o.getString("name"),
+        kind = o.optInt("kind", TRACK_AUDIO),
+        samples = samples?.let { a -> (0 until a.length()).map { sampleFromJson(a.getJSONObject(it)) } }
+            ?: emptyList(),
         gain = o.getDouble("gain").toFloat(),
         pan = o.getDouble("pan").toFloat(),
         mute = o.getBoolean("mute"),
@@ -214,6 +362,7 @@ private fun trackFromJson(o: JSONObject): Track {
 /** [legacy] supplies what a manifest from before a field existed lacks. */
 fun songFromJson(o: JSONObject, legacy: Song = Song(name = "")): Song {
     val tracks = o.getJSONArray("tracks")
+    val patterns = o.optJSONArray("patterns")
     return Song(
         name = o.getString("name"),
         sampleRate = o.getInt("sampleRate"),
@@ -221,6 +370,10 @@ fun songFromJson(o: JSONObject, legacy: Song = Song(name = "")): Song {
         master = trackFromJson(o.getJSONObject("master")),
         nextTrackId = o.getInt("nextTrackId"),
         nextClipId = o.getInt("nextClipId"),
+        patterns = patterns?.let { a -> (0 until a.length()).map { patternFromJson(a.getJSONObject(it)) } }
+            ?: emptyList(),
+        nextPatternId = o.optInt("nextPatternId", 1),
+        nextSampleId = o.optInt("nextSampleId", 1),
         tempoBpm = o.optDouble("tempoBpm", 120.0).toFloat(),
         beatsPerBar = o.optInt("beatsPerBar", 4),
         loopStart = o.optLong("loopStart", 0),

@@ -12,6 +12,7 @@ import org.paw.app.ST_IN_DEVICE_ID
 import org.paw.app.ST_INPUT_OPEN
 import org.paw.app.ST_OUTPUT_OPEN
 import org.paw.app.ST_PLAYHEAD
+import org.paw.app.ST_PREVIEW_POS
 import org.paw.app.ST_REC_FRAMES
 import org.paw.app.ST_REC_START_FRAME
 import org.paw.app.ST_RECORDING
@@ -143,6 +144,26 @@ class ShadowEngine {
     }
 
     @Implementation
+    fun setHits(gen: Long, frames: LongArray, samples: IntArray, velocities: FloatArray) {
+    }
+
+    @Implementation
+    fun setPreview(gen: Long, frames: LongArray, samples: IntArray, velocities: FloatArray, loopFrames: Long) {
+    }
+
+    @Implementation
+    fun mixdownSetSampler(
+        trackIds: IntArray,
+        paths: Array<String>,
+        srcStarts: LongArray,
+        lengths: LongArray,
+        hitFrames: LongArray,
+        hitSamples: IntArray,
+        hitVelocities: FloatArray,
+    ) {
+    }
+
+    @Implementation
     fun setLoop(gen: Long, enabled: Boolean, startFrame: Long, endFrame: Long) {
     }
 
@@ -181,6 +202,7 @@ class ShadowEngine {
         dst[ST_IN_CHANNELS] = inChannels.toLong()
         dst[ST_IN_DEVICE_ID] = 42L
         dst[ST_SAMPLE_RATE] = 48000L
+        dst[ST_PREVIEW_POS] = -1L
     }
 
     @Implementation
@@ -262,6 +284,7 @@ class ShadowEngine {
 
     @Implementation
     fun mixdownAddTrack(
+        trackId: Int,
         isMaster: Boolean,
         gain: Float,
         pan: Float,

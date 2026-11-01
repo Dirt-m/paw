@@ -90,6 +90,21 @@ object Engine {
      *  engine's trigger queue has a single producer. */
     external fun triggerSample(index: Int, velocity: Float)
 
+    /** The song's programmed hits, in timeline frames, as indices into the
+     *  samples last passed to [setSamples]. Replaces the previous set. */
+    external fun setHits(gen: Long, frames: LongArray, samples: IntArray, velocities: FloatArray)
+
+    /** Loops hits at frame offsets in [0, loopFrames) while the transport is
+     *  stopped; loopFrames 0 stops it. Replacing a running preview keeps its
+     *  place. ST_PREVIEW_POS reports where it is. */
+    external fun setPreview(
+        gen: Long,
+        frames: LongArray,
+        samples: IntArray,
+        velocities: FloatArray,
+        loopFrames: Long,
+    )
+
     // ---- transport ----
     //
     // Intent in, outcome out: the engine decides under its own lock, so no
@@ -199,7 +214,19 @@ object Engine {
 
     external fun mixdownBegin()
 
+    /** The samples and hits the render plays, set once per mixdown. */
+    external fun mixdownSetSampler(
+        trackIds: IntArray,
+        paths: Array<String>,
+        srcStarts: LongArray,
+        lengths: LongArray,
+        hitFrames: LongArray,
+        hitSamples: IntArray,
+        hitVelocities: FloatArray,
+    )
+
     external fun mixdownAddTrack(
+        trackId: Int,
         isMaster: Boolean,
         gain: Float,
         pan: Float,
@@ -250,7 +277,9 @@ const val ST_DROPPED_CALLS = 14
 /** Clips whose take file the renderer could not open, cumulative for the song.
  *  They play as silence, so this is the only signal they exist. */
 const val ST_MISSING_TAKES = 15
-const val ENGINE_STATE_SLOTS = 16
+/** Frames into the looping pattern preview; -1 when none plays. */
+const val ST_PREVIEW_POS = 16
+const val ENGINE_STATE_SLOTS = 17
 
 // What toggleRecordSession() did; mirrors AudioEngine.h's kRecToggle* codes.
 const val REC_TOGGLE_ERROR = 0

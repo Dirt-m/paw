@@ -78,23 +78,32 @@ be imported into the song: WAV at any common rate and depth, and compressed form
 the platform can decode. A 48 kHz WAV is copied sample for sample; anything else is
 resampled to 48 kHz.
 
-## Samples
+## Samples and patterns
 
-A sample is a slice of a take: a start and an end inside the file, with its own level
-and pitch. Like a clip, it refers to the take and never copies or changes it. Takes
-recorded or imported into the song are where samples come from.
+A sample is a slice of a take, with its own level. Like a clip, it refers to the take
+and never copies or changes it. A sample is cut on the timeline with the clip tools
+(trim, split) and then turned into a sample from the selected clip.
 
-Each sample lives on a sample track, which has the same controls, effect chain and
-routing to the master as any other track. Its lane shows hits instead of waveforms. A
-hit is a position on the grid and a velocity. Hits snap to the grid by default, which
-follows the meter map (the beat unit, its grouping, and an optional subdivision such as
-16ths or triplets), and they can be placed off the grid.
+Samples live on beat tracks. A beat track holds a kit of samples and has the same
+fader, pan, mute, solo, effect chain and routing to the master as any other track, but
+no input. Its lane holds pattern clips instead of recordings.
 
-Samples are played by hand. The sampler screen shows every sample in the song as a
-large tile, and touching one plays it at once, through its track's effects. While
-recording, those touches land as hits on the sample's lane, placed where the player
-heard them. Quantizing moves hits to the grid and can be undone. Hits are not MIDI and
-there is no MIDI input.
+A pattern is a step grid over a kit: one row per sample, one column per step. It has
+its own time signature (any beat count from 1 to 16 over a beat unit of 4, 8 or 16), a
+grouping of its beats (7/8 as 2+2+3, 3+2+2 or 2+3+2), a length in bars, and a
+resolution of 1 to 4 steps per beat, so straight, triplet and sixteenth grids are all
+there. The grouping shades the grid and numbers its beats. A pattern loops on its own
+for editing, with the transport stopped.
+
+A pattern clip places a pattern on a beat track. It moves, trims, splits, duplicates
+and deletes like an audio clip; stretching it repeats the pattern. Pattern positions
+are in musical time, so a tempo change keeps pattern clips on their bars. Pattern
+clips play in the song, in the loop and in mixdown.
+
+Samples are played by hand. Each sample on the sampler screen is a tile that sounds
+the moment it is touched, through its track's effects, and two tiles can be hit at
+once. Recording those touches into a pattern comes later. Hits are not MIDI and there
+is no MIDI input.
 
 ## Effects
 

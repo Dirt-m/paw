@@ -30,6 +30,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.paw.app.model.Clip
+import org.paw.app.model.Hit
+import org.paw.app.model.Pattern
+import org.paw.app.model.Sample
+import org.paw.app.model.TRACK_BEAT
+import org.paw.app.model.defaultGrouping
 import org.paw.app.model.Effect
 import org.paw.app.model.INPUT_CH1
 import org.paw.app.model.INPUT_NONE
@@ -99,6 +104,11 @@ class SongController(
 
         /** Longest slice a sample holds in memory: 10 s, about 3.8 MB. */
         const val MAX_SAMPLE_FRAMES = 10L * SAMPLE_RATE
+
+        /** Bank and hit pushes run one at a time, so a slow bank load can
+         *  never land after the hits that were computed for the next one. */
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+        val samplerIo = Dispatchers.IO.limitedParallelism(1)
     }
 
     private val gen: Long = songGenerations.incrementAndGet()
@@ -177,6 +187,7 @@ class SongController(
         syncDiff(prev.master, s.master)
         syncMetronome()
         syncLoop()
+        syncSampler()
         selectedClip = selectedClip?.takeIf { (tid, cid) ->
             s.track(tid)?.clips?.any { it.id == cid } == true
         }
@@ -249,13 +260,27 @@ class SongController(
     val followSmooth: Boolean get() = prefs.followSmooth
 
     fun setTempo(bpm: Float, beatsPerBar: Int = song.beatsPerBar) {
+        val tempo = bpm.coerceIn(30f, 300f)
+        // Pattern clips live in musical time: their frames scale with the
+        // tempo so they keep their bars. Audio clips stay where they are.
+        val ratio = song.tempoBpm / tempo
+        fun Long.scaled() = Math.round(this * ratio.toDouble())
+        val tracks = if (ratio == 1f) song.tracks else song.tracks.map { t ->
+            if (t.clips.none { it.isPattern }) t
+            else t.copy(clips = t.clips.map {
+                if (!it.isPattern) it
+                else it.copy(start = it.start.scaled(), srcStart = it.srcStart.scaled(), length = it.length.scaled())
+            })
+        }
         saveSettings(
             song.copy(
-                tempoBpm = bpm.coerceIn(30f, 300f),
+                tempoBpm = tempo,
                 beatsPerBar = beatsPerBar.coerceIn(1, 12),
+                tracks = tracks,
             ),
         )
         syncMetronome()
+        syncSampler()
     }
 
     private fun syncMetronome() {
@@ -332,6 +357,7 @@ class SongController(
         // from deleted takes.
         Engine.openSong(gen)
         syncAllToEngine()
+        syncSampler()
         syncMetronome()
         syncLoop()
         // The controller's own scope, so everything launched here dies with
@@ -360,7 +386,10 @@ class SongController(
             // three ways (unreferenced, zero frames, header-sized) so a corrupt
             // take that merely fails to parse is never touched.
             val used = buildSet {
-                for (t in song.tracks) for (c in t.clips) add(c.take)
+                for (t in song.tracks) {
+                    for (c in t.clips) add(c.take)
+                    for (s in t.samples) add(s.take)
+                }
             }
             audioDir.listFiles { f -> f.isFile && f.name.endsWith(".wav") }?.forEach { f ->
                 if ("audio/" + f.name !in used && f.length() <= 128 &&
@@ -397,6 +426,7 @@ class SongController(
         if (stateBuf[ST_REC_RESULT_READY] != 0L) placeRecordedTakes()
         playheadFrame = stateBuf[ST_PLAYHEAD]
         recFrames = stateBuf[ST_REC_FRAMES]
+        previewFrame = stateBuf[ST_PREVIEW_POS]
         val next = EngineStatus(
             transport = stateBuf[ST_TRANSPORT].toInt(),
             countdown = stateBuf[ST_COUNTDOWN],
@@ -473,15 +503,17 @@ class SongController(
     private fun absPath(rel: String) = File(projectDir, rel).absolutePath
 
     private fun syncClips(track: Track) {
+        // Pattern clips play through the sampler, not the disk thread.
+        val clips = track.clips.filterNot { it.isPattern }
         Engine.syncClips(
             gen,
             track.id,
-            track.clips.map { absPath(it.take) }.toTypedArray(),
-            track.clips.map { it.srcStart }.toLongArray(),
-            track.clips.map { it.length }.toLongArray(),
-            track.clips.map { it.start }.toLongArray(),
-            track.clips.map { it.fadeIn }.toLongArray(),
-            track.clips.map { it.fadeOut }.toLongArray(),
+            clips.map { absPath(it.take) }.toTypedArray(),
+            clips.map { it.srcStart }.toLongArray(),
+            clips.map { it.length }.toLongArray(),
+            clips.map { it.start }.toLongArray(),
+            clips.map { it.fadeIn }.toLongArray(),
+            clips.map { it.fadeOut }.toLongArray(),
         )
     }
 
@@ -534,6 +566,7 @@ class SongController(
         val prev = song
         song = updated
         saveFlow.value = updated
+        syncSampler()
         for (t in resync) {
             // Every clip sync while playing is an audible ring re-prime, so
             // push clips only when they changed.
@@ -736,7 +769,9 @@ class SongController(
     }
 
     fun trimClipRight(trackId: Int, clipId: Int, newEnd: Long) {
-        editClip(trackId, clipId) { it.trimmedRight(newEnd, takeFrames(it.take)) }
+        editClip(trackId, clipId) {
+            it.trimmedRight(newEnd, if (it.isPattern) Long.MAX_VALUE else takeFrames(it.take))
+        }
     }
 
     fun setClipFades(trackId: Int, clipId: Int, fadeIn: Long, fadeOut: Long) {
@@ -760,6 +795,7 @@ class SongController(
             start = clip.start + offset,
             fadeIn = 0,
             fadeOut = clip.fadeOut.coerceAtMost(clip.length - offset),
+            pattern = clip.pattern,
         )
         val updated = track.copy(
             clips = track.clips.flatMap { if (it.id == clipId) listOf(left, right) else listOf(it) },
@@ -784,6 +820,10 @@ class SongController(
         val dest = song.tracks.getOrNull(idx + dir) ?: return
         val src = song.tracks.getOrNull(idx) ?: return
         val clip = src.clips.find { it.id == clipId } ?: return
+        if (src.kind != dest.kind) {
+            message = if (clip.isPattern) "Patterns go on beat tracks" else "Beat tracks hold patterns"
+            return
+        }
         pushUndo()
         val newSrc = src.copy(clips = src.clips.filterNot { it.id == clipId })
         val newDest = dest.copy(clips = dest.clips + clip)
@@ -806,7 +846,10 @@ class SongController(
     /** Every recording WAV in the project's audio dir, with usage counts. */
     fun allTakes(): List<TakeEntry> {
         val used = HashMap<String, Int>()
-        for (t in song.tracks) for (c in t.clips) used.merge(c.take, 1, Int::plus)
+        for (t in song.tracks) {
+            for (c in t.clips) if (!c.isPattern) used.merge(c.take, 1, Int::plus)
+            for (s in t.samples) used.merge(s.take, 1, Int::plus)
+        }
         return (audioDir.listFiles { f -> f.isFile && f.name.endsWith(".wav") } ?: emptyArray())
             .sortedByDescending { it.lastModified() }
             .map { f ->
@@ -830,6 +873,10 @@ class SongController(
             message = "Recording is on the timeline. Remove its clips first"
             return false
         }
+        if (song.tracks.any { t -> t.samples.any { it.take == entry.rel } }) {
+            message = "Recording is a sample. Remove the sample first"
+            return false
+        }
         if (!entry.file.delete()) {
             message = "Couldn't delete ${entry.name}"
             return false
@@ -839,6 +886,10 @@ class SongController(
 
     fun addTakeToTrack(trackId: Int, takeRel: String, atFrame: Long) {
         val track = song.track(trackId) ?: return
+        if (track.kind == TRACK_BEAT) {
+            message = "Beat tracks hold patterns"
+            return
+        }
         val frames = takeFrames(takeRel)
         if (frames <= 0) {
             message = "Can't read recording"
@@ -954,37 +1005,257 @@ class SongController(
     }
 
     // ---- sampler ----
+    //
+    // Beat tracks hold a kit of samples; patterns are step grids over a kit,
+    // and pattern clips place them on a beat track. The engine sees one bank
+    // of every beat track's samples and one sorted list of every hit the
+    // pattern clips expand to, both rebuilt here whenever the song changes.
 
-    /** One playable sound: which track it plays through, and what to call it. */
-    data class SampleTile(val trackId: Int, val label: String)
-
-    var sampleTiles: List<SampleTile> by mutableStateOf(emptyList())
+    /** Frames into the pattern preview, or -1 when none plays. */
+    var previewFrame: Long by mutableLongStateOf(-1L)
         private set
 
-    /**
-     * Until samples have tracks of their own, every clip on the timeline is a
-     * sample: a clip already is a slice of a take, and it plays through its
-     * track's effects. Slices are capped so a long take can't fill memory.
-     */
-    fun loadClipSamples() {
-        val scope = scope ?: return
-        val clips = song.tracks.flatMap { t -> t.clips.sortedBy { it.start }.mapIndexed { i, c -> Triple(t, i, c) } }
-        scope.launch {
-            val loaded = withContext(Dispatchers.IO) {
-                Engine.setSamples(
-                    gen,
-                    IntArray(clips.size) { clips[it].first.id },
-                    Array(clips.size) { absPath(clips[it].third.take) },
-                    LongArray(clips.size) { clips[it].third.srcStart },
-                    LongArray(clips.size) { clips[it].third.length.coerceAtMost(MAX_SAMPLE_FRAMES) },
-                )
-            }
-            sampleTiles = clips.map { (t, i, _) -> SampleTile(t.id, "${t.name} ${i + 1}") }
-            if (loaded < clips.size) message = "${clips.size - loaded} of ${clips.size} samples could not be read"
+    /** The pattern looping in the preview, or null. */
+    var previewing: Int? by mutableStateOf(null)
+        private set
+    private var previewTrack: Int = 0
+
+    private class HitArrays(val frames: LongArray, val samples: IntArray, val velocities: FloatArray)
+
+    /** Every beat track's samples in bank order, as (trackId, sample). */
+    private fun bankOf(s: Song): List<Pair<Int, Sample>> =
+        s.tracks.filter { it.kind == TRACK_BEAT }.flatMap { t -> t.samples.map { t.id to it } }
+
+    private fun bankIndex(bank: List<Pair<Int, Sample>>, trackId: Int, sampleId: Int): Int =
+        bank.indexOfFirst { it.first == trackId && it.second.id == sampleId }
+
+    /** The pattern's hits at frame offsets from its start, inside its length. */
+    private fun patternHits(
+        s: Song,
+        p: Pattern,
+        trackId: Int,
+        bank: List<Pair<Int, Sample>>,
+        out: (offset: Long, index: Int, velocity: Float) -> Unit,
+    ) {
+        for (h in p.hits) {
+            if (h.tick >= p.lengthTicks) continue
+            val idx = bankIndex(bank, trackId, h.sample)
+            if (idx < 0) continue
+            out(s.framesOf(h.tick), idx, h.velocity * bank[idx].second.gain)
         }
     }
 
-    fun triggerSample(index: Int) = Engine.triggerSample(index, 1f)
+    /** Every pattern clip, repeated over its length, as timeline hits. */
+    private fun hitsOf(s: Song, bank: List<Pair<Int, Sample>>): HitArrays {
+        val frames = ArrayList<Long>()
+        val samples = ArrayList<Int>()
+        val vels = ArrayList<Float>()
+        for (t in s.tracks) {
+            if (t.kind != TRACK_BEAT) continue
+            for (c in t.clips) {
+                val p = s.pattern(c.pattern) ?: continue
+                val len = s.framesOf(p.lengthTicks)
+                if (len <= 0) continue
+                patternHits(s, p, t.id, bank) { off, idx, vel ->
+                    var pos = Math.floorMod(off - c.srcStart, len)
+                    while (pos < c.length) {
+                        frames += c.start + pos
+                        samples += idx
+                        vels += vel
+                        pos += len
+                    }
+                }
+            }
+        }
+        return HitArrays(frames.toLongArray(), samples.toIntArray(), vels.toFloatArray())
+    }
+
+    private var syncedBank: List<Triple<Int, String, Pair<Long, Long>>>? = null
+    private var syncedHitsKey: Any? = null
+
+    /** Pushes the bank when the set of slices changed, then the hits and the
+     *  preview when anything they depend on changed. */
+    private fun syncSampler() {
+        val s = song
+        val bank = bankOf(s)
+        val bankKey = bank.map { (tid, smp) -> Triple(tid, smp.take, smp.srcStart to smp.length) }
+        val hitsKey = listOf(s.tempoBpm, s.patterns, s.tracks.filter { it.kind == TRACK_BEAT }.map { it.clips to it.samples })
+        val loadBank = bankKey != syncedBank
+        if (!loadBank && hitsKey == syncedHitsKey) return
+        syncedBank = bankKey
+        syncedHitsKey = hitsKey
+        val hits = hitsOf(s, bank)
+        val preview = previewing?.let { previewArrays(s, it, previewTrack, bank) }
+        val previewLen = previewing?.let { id -> s.pattern(id)?.let { s.framesOf(it.lengthTicks) } } ?: 0L
+        val scope = scope ?: return
+        scope.launch(samplerIo) {
+            if (loadBank) {
+                val loaded = Engine.setSamples(
+                    gen,
+                    IntArray(bank.size) { bank[it].first },
+                    Array(bank.size) { absPath(bank[it].second.take) },
+                    LongArray(bank.size) { bank[it].second.srcStart },
+                    LongArray(bank.size) { bank[it].second.length },
+                )
+                if (loaded < bank.size) withContext(Dispatchers.Main) {
+                    message = "${bank.size - loaded} sample(s) could not be read"
+                }
+            }
+            Engine.setHits(gen, hits.frames, hits.samples, hits.velocities)
+            if (preview != null) {
+                Engine.setPreview(gen, preview.frames, preview.samples, preview.velocities, previewLen)
+            }
+        }
+    }
+
+    private fun previewArrays(s: Song, patternId: Int, trackId: Int, bank: List<Pair<Int, Sample>>): HitArrays? {
+        val p = s.pattern(patternId) ?: return null
+        val frames = ArrayList<Long>()
+        val samples = ArrayList<Int>()
+        val vels = ArrayList<Float>()
+        patternHits(s, p, trackId, bank) { off, idx, vel ->
+            frames += off
+            samples += idx
+            vels += vel
+        }
+        return HitArrays(frames.toLongArray(), samples.toIntArray(), vels.toFloatArray())
+    }
+
+    /** Loops [patternId] through [trackId]'s kit with the transport stopped. */
+    fun startPreview(trackId: Int, patternId: Int) {
+        if (status.transport != TRANSPORT_STOPPED) stopAll()
+        previewing = patternId
+        previewTrack = trackId
+        val s = song
+        val p = s.pattern(patternId) ?: return
+        val a = previewArrays(s, patternId, trackId, bankOf(s)) ?: return
+        val len = s.framesOf(p.lengthTicks)
+        val scope = scope ?: return
+        scope.launch(samplerIo) { Engine.setPreview(gen, a.frames, a.samples, a.velocities, len) }
+    }
+
+    fun stopPreview() {
+        if (previewing == null) return
+        previewing = null
+        val scope = scope ?: return
+        scope.launch(samplerIo) { Engine.setPreview(gen, LongArray(0), IntArray(0), FloatArray(0), 0) }
+    }
+
+    /** Plays one of [trackId]'s samples now; the finger-drumming path. */
+    fun triggerSample(trackId: Int, sampleId: Int, velocity: Float = 1f) {
+        val bank = bankOf(song)
+        val idx = bankIndex(bank, trackId, sampleId)
+        if (idx >= 0) Engine.triggerSample(idx, velocity * bank[idx].second.gain)
+    }
+
+    fun addBeatTrack(): Int {
+        pushUndo()
+        val id = song.nextTrackId
+        val n = song.tracks.count { it.kind == TRACK_BEAT } + 1
+        val track = Track(
+            id = id, name = "Beats $n", kind = TRACK_BEAT,
+            inputDevice = InputDevice.None, inputMode = INPUT_NONE,
+        )
+        commit(song.copy(tracks = song.tracks + track, nextTrackId = id + 1), track)
+        return id
+    }
+
+    /** The beat track the sampler screen opens on: the first one, made if
+     *  the song has none. */
+    fun beatTrackForSampler(): Int =
+        song.tracks.firstOrNull { it.kind == TRACK_BEAT }?.id ?: addBeatTrack()
+
+    /** Turns an audio clip's slice into a sample on a beat track (the first
+     *  one, made if there is none). Trim and split on the timeline are how a
+     *  sample gets cut. */
+    fun sampleFromClip(trackId: Int, clipId: Int) {
+        val src = song.track(trackId) ?: return
+        val clip = src.clips.find { it.id == clipId } ?: return
+        if (clip.isPattern) return
+        val beatId = song.tracks.firstOrNull { it.kind == TRACK_BEAT }?.id
+        if (beatId == null) addBeatTrack() else pushUndo()
+        val beat = song.tracks.first { it.kind == TRACK_BEAT }
+        val sample = Sample(
+            id = song.nextSampleId,
+            name = "${src.name} ${src.clips.sortedBy { it.start }.indexOf(clip) + 1}",
+            take = clip.take,
+            srcStart = clip.srcStart,
+            length = clip.length.coerceAtMost(MAX_SAMPLE_FRAMES),
+        )
+        val updated = beat.copy(samples = beat.samples + sample)
+        commit(song.withTrack(updated).copy(nextSampleId = song.nextSampleId + 1))
+        message = "Added ${sample.name} to ${beat.name}"
+    }
+
+    fun removeSample(trackId: Int, sampleId: Int) {
+        val t = song.track(trackId) ?: return
+        pushUndo()
+        // Its hits stay in the patterns and come back with an undo; with the
+        // sample gone they are silent.
+        commit(song.withTrack(t.copy(samples = t.samples.filterNot { it.id == sampleId })))
+    }
+
+    fun setSampleGain(trackId: Int, sampleId: Int, gain: Float, undoable: Boolean = true) {
+        val t = song.track(trackId) ?: return
+        if (undoable) pushUndo()
+        commit(song.withTrack(t.copy(samples = t.samples.map { if (it.id == sampleId) it.copy(gain = gain) else it })))
+    }
+
+    /** A new empty pattern, placed on [trackId] at the bar at or after the
+     *  playhead. Returns its id. */
+    fun newPattern(trackId: Int, from: Pattern? = null): Int {
+        pushUndo()
+        val id = song.nextPatternId
+        val p = (from ?: Pattern(id = id, name = "")).copy(id = id, name = "Pattern $id")
+        commit(song.copy(patterns = song.patterns + p, nextPatternId = id + 1))
+        placePattern(trackId, id, undoable = false)
+        return id
+    }
+
+    /** Puts a clip of [patternId] on [trackId], one pattern long, at the
+     *  song bar at or after the playhead. */
+    fun placePattern(trackId: Int, patternId: Int, undoable: Boolean = true) {
+        val t = song.track(trackId) ?: return
+        val p = song.pattern(patternId) ?: return
+        val bar = framesPerBeat * song.beatsPerBar
+        val at = (playheadFrame + bar - 1) / bar * bar
+        if (undoable) pushUndo()
+        val clip = Clip(
+            id = song.nextClipId, take = "", srcStart = 0,
+            length = song.framesOf(p.lengthTicks).coerceAtLeast(MIN_CLIP_FRAMES),
+            start = at, pattern = patternId,
+        )
+        val updated = t.copy(clips = t.clips + clip)
+        commit(song.withTrack(updated).copy(nextClipId = song.nextClipId + 1), updated)
+        selectedClip = trackId to clip.id
+    }
+
+    /** undoable=false for a gesture that already pushed (beginGesture). */
+    fun editPattern(patternId: Int, undoable: Boolean = true, transform: (Pattern) -> Pattern) {
+        val p = song.pattern(patternId) ?: return
+        val next = transform(p)
+        if (next == p) return
+        if (undoable) pushUndo()
+        commit(song.copy(patterns = song.patterns.map { if (it.id == patternId) next else it }))
+    }
+
+    /** Sets or clears the hit for [sampleId] on grid step [step]. */
+    fun setStep(patternId: Int, sampleId: Int, step: Int, on: Boolean, undoable: Boolean = true) {
+        editPattern(patternId, undoable) { p ->
+            // Anything inside the step counts, so a hit left between steps by
+            // a change of resolution can still be cleared.
+            val rest = p.hits.filterNot { it.sample == sampleId && it.tick / p.ticksPerStep == step }
+            p.copy(hits = if (on) rest + Hit(sampleId, step * p.ticksPerStep) else rest)
+        }
+    }
+
+    /** A new time signature resets the grouping to that beat count's default. */
+    fun setPatternMeter(patternId: Int, beats: Int, unit: Int) {
+        editPattern(patternId) {
+            val b = beats.coerceIn(1, 16)
+            it.copy(beats = b, unit = unit, grouping = if (b == it.beats) it.grouping else defaultGrouping(b))
+        }
+    }
 
     // ---- import ----
 
@@ -1034,6 +1305,15 @@ class SongController(
         try {
             return withContext(Dispatchers.IO) {
                 Engine.mixdownBegin()
+                val bank = bankOf(song)
+                val hits = hitsOf(song, bank)
+                Engine.mixdownSetSampler(
+                    IntArray(bank.size) { bank[it].first },
+                    Array(bank.size) { absPath(bank[it].second.take) },
+                    LongArray(bank.size) { bank[it].second.srcStart },
+                    LongArray(bank.size) { bank[it].second.length },
+                    hits.frames, hits.samples, hits.velocities,
+                )
                 for (t in song.tracks) mixdownAdd(t, isMaster = false)
                 mixdownAdd(song.master, isMaster = true)
                 val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
@@ -1053,15 +1333,17 @@ class SongController(
     }
 
     private fun mixdownAdd(track: Track, isMaster: Boolean) {
+        val clips = track.clips.filterNot { it.isPattern }
         Engine.mixdownAddTrack(
+            track.id,
             isMaster,
             track.gain, track.pan, track.mute, track.solo,
-            track.clips.map { absPath(it.take) }.toTypedArray(),
-            track.clips.map { it.srcStart }.toLongArray(),
-            track.clips.map { it.length }.toLongArray(),
-            track.clips.map { it.start }.toLongArray(),
-            track.clips.map { it.fadeIn }.toLongArray(),
-            track.clips.map { it.fadeOut }.toLongArray(),
+            clips.map { absPath(it.take) }.toTypedArray(),
+            clips.map { it.srcStart }.toLongArray(),
+            clips.map { it.length }.toLongArray(),
+            clips.map { it.start }.toLongArray(),
+            clips.map { it.fadeIn }.toLongArray(),
+            clips.map { it.fadeOut }.toLongArray(),
             track.effects.map { it.pluginId }.toTypedArray(),
             track.effects.map { it.values.toFloatArray() }.toTypedArray(),
             track.effects.map { it.bypass }.toBooleanArray(),

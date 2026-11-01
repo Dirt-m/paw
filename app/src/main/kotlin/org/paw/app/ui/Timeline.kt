@@ -40,6 +40,7 @@ import org.paw.app.PeakData
 import org.paw.app.SongController
 import org.paw.app.TRANSPORT_STOPPED
 import org.paw.app.model.Clip
+import org.paw.app.model.Song
 import org.paw.app.model.Track
 import org.paw.app.model.movedTo
 import org.paw.app.model.trimmedLeft
@@ -387,7 +388,7 @@ private fun hitTest(
     val x1 = tl.pxOf(sel.end)
     val width = x1 - x0
     val edge = minOf(edgePx, width / 3f)
-    val fadeZone = ofsY < laneH * 0.38f
+    val fadeZone = ofsY < laneH * 0.38f && !sel.isPattern
     val fadeLx = x0 + sel.fadeIn / tl.framesPerPx
     val fadeRx = x1 - sel.fadeOut / tl.framesPerPx
     return when {
@@ -423,6 +424,13 @@ fun ClipLane(
         }
     }
     val waveLines = remember { FloatArray(MAX_WAVE_COLS * 4) }
+    val labelPaint = remember(density) {
+        android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(230, 236, 234, 228)
+            textSize = with(density) { 11.sp.toPx() }
+            isAntiAlias = true
+        }
+    }
     val waveCache = remember { WaveCache() }
 
     // Drag preview: applied to the model only on release. Both states must be
@@ -580,14 +588,22 @@ fun ClipLane(
             val bot = size.height - 3f
 
             drawRect(
-                if (isSel) Colors.amber.copy(alpha = 0.12f) else Colors.clip,
+                when {
+                    isSel -> Colors.amber.copy(alpha = 0.12f)
+                    clip.isPattern -> Colors.green.copy(alpha = 0.10f)
+                    else -> Colors.clip
+                },
                 topLeft = Offset(x0, top),
                 size = Size(x1 - x0, bot - top),
             )
-            drawWaveform(
-                waveCache, peaks[clip.take], clip.take, srcStart, length,
-                x0, x1, tl.framesPerPx, wavePaint, waveLines,
-            )
+            if (clip.isPattern) {
+                drawPatternClip(controller.song, track, preview, tl, top, bot, labelPaint)
+            } else {
+                drawWaveform(
+                    waveCache, peaks[clip.take], clip.take, srcStart, length,
+                    x0, x1, tl.framesPerPx, wavePaint, waveLines,
+                )
+            }
 
             // Shade the silent wedge under the ramp, so a fade reads as a
             // region and not a stray diagonal.
@@ -634,10 +650,10 @@ fun ClipLane(
                     drawLine(Colors.bg, Offset(x + gripInset, cy - hh * 0.45f), Offset(x + gripInset, cy + hh * 0.45f), strokeWidth = 1.5.dp.toPx())
                 }
                 // A ring at the top end of each ramp; drag it sideways to
-                // change the fade.
+                // change the fade. Patterns have no fades.
                 val r = 8.dp.toPx()
                 val cyF = top + r + 3.dp.toPx()
-                for (x in floatArrayOf(fxL, fxR)) {
+                for (x in if (clip.isPattern) floatArrayOf() else floatArrayOf(fxL, fxR)) {
                     drawCircle(Colors.bg, r + 2.dp.toPx(), Offset(x, cyF))
                     drawCircle(Colors.green, r, Offset(x, cyF))
                     drawCircle(Colors.bg, r * 0.38f, Offset(x, cyF))
@@ -669,6 +685,69 @@ fun ClipLane(
         val px = tl.pxOf(controller.playheadFrame)
         if (px in 0f..size.width) {
             drawLine(Colors.amber, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
+        }
+    }
+}
+
+// ------------------------------------------------------------ pattern clips --
+
+/**
+ * A pattern clip: its name, a faint line where each repeat starts, and a mark
+ * per hit, one row per sample of the track's kit, the way the step grid has
+ * them.
+ */
+private fun DrawScope.drawPatternClip(
+    song: Song,
+    track: Track,
+    clip: Clip,
+    tl: TimelineState,
+    top: Float,
+    bot: Float,
+    labelPaint: android.graphics.Paint,
+) {
+    val p = song.pattern(clip.pattern) ?: return
+    val len = song.framesOf(p.lengthTicks)
+    if (len <= 0) return
+    val x0 = tl.pxOf(clip.start)
+    val x1 = tl.pxOf(clip.end)
+    val labelH = labelPaint.textSize + 6f
+    drawContext.canvas.nativeCanvas.apply {
+        save()
+        clipRect(x0, top, x1, bot)
+        drawText(p.name, x0 + 6f, top + labelPaint.textSize + 2f, labelPaint)
+        restore()
+    }
+
+    // Repeat boundaries.
+    var rep = len - Math.floorMod(clip.srcStart, len)
+    if (rep == len) rep = 0
+    while (rep < clip.length) {
+        val x = tl.pxOf(clip.start + rep)
+        if (rep > 0 && x in 0f..size.width) drawLine(Colors.green.copy(alpha = 0.5f), Offset(x, top), Offset(x, bot))
+        rep += len
+    }
+
+    val rows = track.samples.size
+    if (rows == 0) return
+    val rowH = (bot - top - labelH - 4f) / rows
+    val stepPx = song.framesOf(p.ticksPerStep) / tl.framesPerPx
+    val markW = (stepPx * 0.6f).coerceIn(2f, 10f)
+    val visStart = tl.frameAt(0f)
+    val visEnd = tl.frameAt(size.width)
+    for (h in p.hits) {
+        if (h.tick >= p.lengthTicks) continue
+        val row = track.samples.indexOfFirst { it.id == h.sample }
+        if (row < 0) continue
+        val y = top + labelH + row * rowH
+        var pos = Math.floorMod(song.framesOf(h.tick) - clip.srcStart, len)
+        while (pos < clip.length) {
+            val f = clip.start + pos
+            if (f > visEnd) break
+            if (f >= visStart - len) {
+                val x = tl.pxOf(f)
+                drawRect(Colors.amber.copy(alpha = 0.85f), Offset(x, y + 1f), Size(markW, (rowH - 2f).coerceAtLeast(1f)))
+            }
+            pos += len
         }
     }
 }
