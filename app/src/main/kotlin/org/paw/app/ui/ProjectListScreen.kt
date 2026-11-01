@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -69,12 +68,14 @@ fun ProjectListScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "PAW",
+                    "PAW!",
                     style = TitleStyle.copy(color = Colors.accent, fontSize = 26.sp),
                     modifier = Modifier.weight(1f),
                 )
                 AppButton("Settings", accent = Colors.dim, height = 44.dp, onClick = onOpenSettings)
-                if (!empty) {
+                // A wide window is short: the action stays in the header
+                // instead of taking a row of the list.
+                if (!empty && !compact) {
                     HSpace(8.dp)
                     AppButton("+  New song", accent = Colors.accent, filled = true, height = 44.dp,
                         enabled = !loading, onClick = onCreate)
@@ -86,6 +87,7 @@ fun ProjectListScreen(
                 loading -> Text("Moving songs to Documents/PAW…", style = DimStyle)
                 empty -> FirstRun(onCreate, Modifier.weight(1f).fillMaxWidth())
                 else -> LazyColumn(
+                    Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = PaddingValues(bottom = 16.dp),
                 ) {
@@ -94,6 +96,15 @@ fun ProjectListScreen(
                         SongRow(entry, summaries[entry.dir], compact, start, onOpen, onRename, onDelete)
                     }
                 }
+            }
+            // On a phone held upright the one primary action sits under the
+            // thumb.
+            if (!empty && compact) {
+                AppButton(
+                    "+  New song", accent = Colors.accent, filled = true, height = Dimens.touchBig,
+                    fontSize = 15.sp, enabled = !loading, onClick = onCreate,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                )
             }
         }
     }

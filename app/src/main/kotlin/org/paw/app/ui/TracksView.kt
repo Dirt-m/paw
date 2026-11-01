@@ -1,9 +1,12 @@
 package org.paw.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -30,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,17 +65,28 @@ import org.paw.app.model.barStartFrame
 
 // The Tracks mode: the ruler block, the lanes with their headers, the add row.
 
-/** Portrait headers hold their toggles 2 by 2; a wide window has room for one row of four. */
-internal fun tracksHeaderWidth(compact: Boolean): Dp = if (compact) 116.dp else 200.dp
+/** Portrait headers hold their toggles 2 by 2; a wide window has room for
+ *  the input and all four toggles in one row. */
+internal fun tracksHeaderWidth(compact: Boolean): Dp = if (compact) 128.dp else 240.dp
 
 private val OVERVIEW_ROW_H = 40.dp
-private val OVERVIEW_STRIP_H = 16.dp
 private val TRACKS_RULER_H = 28.dp
+private val WIDE_RULER_H = 44.dp
 private val ZOOM_W = 86.dp
-private val LANE_MIN = 104.dp
-private val LANE_MAX = 128.dp
-private val LANE_MIN_SHORT = 64.dp
-private val LANE_MAX_SHORT = 88.dp
+private val HEADER_GAP = 2.dp
+private val HEADER_PAD_TOP = 2.dp
+private val HEADER_PAD_BOTTOM = 3.dp
+// A portrait header stacks three 40 dp rows: the name with the input, the
+// input toggles, mute and solo, with a flexible gap above the toggles. A wide
+// one has the name over a single row.
+private val LANE_MIN = Dimens.touch * 3 + HEADER_GAP * 3 + HEADER_PAD_TOP + HEADER_PAD_BOTTOM
+private val LANE_MAX = 180.dp
+private val LANE_MIN_SHORT = 72.dp
+private val LANE_MAX_SHORT = 96.dp
+// The input button beside a portrait name leaves the name two lines of about
+// ten characters; the wide header's row has room for a roomier one.
+private val BADGE_W = 36.dp
+private val BADGE_W_WIDE = 48.dp
 
 /** Makes [trackId] the one the panels act on, and the one Beats opens on
  *  when it is a beat track. */
@@ -103,19 +118,31 @@ internal fun TracksView(
     Column(Modifier.fillMaxSize()) {
         RulerBlock(controller, ui, tl, headerW, wide = !compact)
 
+        // Portrait gives the add row its own strip under the lanes. A wide
+        // window is short, so the row sits over the bottom of the header
+        // column only and the lanes keep the full height beside it.
+        val addOver = !compact
         BoxWithConstraints(Modifier.weight(1f)) {
             // A handful of tracks grows to fill the viewport; past the cap
             // the list scrolls at the standard height instead.
+            val room = if (addOver) maxHeight - addRowH else maxHeight
             val laneH =
                 if (song.tracks.isEmpty()) laneMin
-                else ((maxHeight - addRowH) / song.tracks.size).coerceIn(laneMin, laneMax)
+                else (room / song.tracks.size).coerceIn(laneMin, laneMax)
             val laneHPx = with(LocalDensity.current) { laneH.toPx() }
             val laneScroll = rememberScrollState()
             var viewportPx by remember { mutableIntStateOf(0) }
 
             // The timeline continues under the last track: grid and playhead
-            // run the full height, so leftover space reads as workspace.
-            Canvas(Modifier.fillMaxSize().padding(start = headerW)) {
+            // run the full height, so leftover space reads as workspace. It
+            // is as wide as the lanes, so it also reports their width when
+            // there are none.
+            Canvas(
+                Modifier
+                    .fillMaxSize()
+                    .padding(start = headerW)
+                    .onSizeChanged { tl.laneWidthPx = it.width.toFloat() },
+            ) {
                 drawGrid(tl, song, ui.clockAsTime)
                 val px = tl.pxOf(controller.playheadFrame)
                 if (px in 0f..size.width) {
@@ -124,14 +151,14 @@ internal fun TracksView(
             }
 
             val headerPx = with(LocalDensity.current) { headerW.toPx() }
-            val trackCount = song.tracks.size
+            // The gesture outlives this composition, so it reads where the
+            // lanes end through state rather than from the first values.
+            val lanesBottom by rememberUpdatedState(song.tracks.size * laneHPx)
             Column(
                 Modifier
                     .fillMaxSize()
                     .onSizeChanged { viewportPx = it.height }
-                    .emptyAreaGestures(tl, controller, headerPx) {
-                        trackCount * laneHPx - laneScroll.value
-                    }
+                    .emptyAreaGestures(tl, controller, headerPx) { lanesBottom - laneScroll.value }
                     .verticalScroll(laneScroll),
             ) {
                 song.tracks.forEachIndexed { index, track ->
@@ -159,15 +186,21 @@ internal fun TracksView(
                         }
                     }
                 }
-                AddRow(controller, ui, Modifier.fillMaxWidth().height(addRowH))
+                // Lets the last lane scroll clear of the add row over it.
+                if (addOver) Spacer(Modifier.height(addRowH))
+            }
+            if (addOver) {
+                AddRow(controller, ui, Modifier.align(Alignment.BottomStart).width(headerW).height(addRowH))
             }
         }
+        if (!addOver) AddRow(controller, ui, Modifier.fillMaxWidth().height(addRowH))
     }
 }
 
 /**
  * New tracks are made where the tracks live, and the song's recordings are
- * one tap from the same row, so none of it scrolls away under a full song.
+ * one tap from the same row. It is pinned below the lanes, not in their
+ * scroll, so a long song never hides it.
  */
 @Composable
 private fun AddRow(controller: SongController, ui: SongUi, modifier: Modifier) {
@@ -177,13 +210,13 @@ private fun AddRow(controller: SongController, ui: SongUi, modifier: Modifier) {
             .drawBehind { drawLine(Colors.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
             .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        AppButton("+ Audio", accent = Colors.accent, padding = 12.dp, onClick = { controller.addTrack() })
-        AppButton("+ Beat", accent = Colors.accent, padding = 12.dp, onClick = {
+        AppButton("+ Audio", accent = Colors.accent, padding = 10.dp, onClick = { controller.addTrack() })
+        AppButton("+ Beat", accent = Colors.accent, padding = 10.dp, onClick = {
             selectTrack(controller, ui, controller.addBeatTrack())
         })
-        AppButton("Takes", padding = 12.dp, onClick = { ui.open(SongPanel.Takes) })
+        AppButton("Takes", padding = 10.dp, onClick = { ui.open(SongPanel.Takes) })
     }
 }
 
@@ -192,8 +225,8 @@ private fun AddRow(controller: SongController, ui: SongUi, modifier: Modifier) {
 /**
  * Fit and Snap in the corner over the headers; the overview strip and the
  * bar ruler over the lanes. Portrait puts − and + beside the overview, so the
- * ruler keeps the full lane width; a wide window lines all four up in the
- * corner.
+ * ruler keeps the full lane width. A wide window is short, so it lines all
+ * four up in the corner and gives the ruler the overview's height.
  */
 @Composable
 private fun RulerBlock(controller: SongController, ui: SongUi, tl: TimelineState, headerW: Dp, wide: Boolean) {
@@ -218,7 +251,7 @@ private fun RulerBlock(controller: SongController, ui: SongUi, tl: TimelineState
     }
 
     if (wide) {
-        Row(Modifier.fillMaxWidth().height(44.dp)) {
+        Row(Modifier.fillMaxWidth().height(WIDE_RULER_H)) {
             Row(
                 Modifier.width(headerW).fillMaxHeight().background(Colors.panel).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -228,10 +261,7 @@ private fun RulerBlock(controller: SongController, ui: SongUi, tl: TimelineState
                 zoomOut(Modifier.width(Dimens.touch))
                 zoomIn(Modifier.width(Dimens.touch))
             }
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Overview(tl, controller, Modifier.fillMaxWidth().height(OVERVIEW_STRIP_H))
-                Ruler(tl, controller, ui, Modifier.fillMaxWidth().weight(1f))
-            }
+            Ruler(tl, controller, ui, Modifier.weight(1f).fillMaxHeight())
         }
     } else {
         Row(Modifier.fillMaxWidth().height(OVERVIEW_ROW_H + TRACKS_RULER_H)) {
@@ -293,9 +323,9 @@ private fun SnapButton(ui: SongUi, modifier: Modifier) {
 
 /**
  * The lane's left panel: name, input, arm / monitor / mute / solo, and the
- * level meter down the right edge. The name or any bare part of the header
- * selects the track and opens its inspector; the input badge opens it at the
- * input list.
+ * level meter down the right edge. The name opens the track's inspector and
+ * the input button opens it at the input list; the rest of the header only
+ * selects the track, so a near miss on a toggle never covers the song.
  */
 @Composable
 private fun TrackHeader(
@@ -310,36 +340,47 @@ private fun TrackHeader(
         selectTrack(controller, ui, track.id)
         ui.open(SongPanel.Inspector(track.id, focusInput = focusInput))
     }
+    val beat = track.kind == TRACK_BEAT
     Row(
         modifier
             .background(if (selected) Colors.raised else Colors.panel)
             .border(1.dp, Colors.line)
             .then(if (selected) Modifier.border(2.dp, Colors.accent) else Modifier)
-            .clickable { open(false) }
-            .padding(start = 6.dp, end = 4.dp, top = 2.dp, bottom = 3.dp),
+            .clickable { selectTrack(controller, ui, track.id) }
+            .padding(start = 6.dp, end = 4.dp, top = HEADER_PAD_TOP, bottom = HEADER_PAD_BOTTOM),
     ) {
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            val beat = track.kind == TRACK_BEAT
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (beat) BeatTitle(track, wide)
-                else AudioTitle(track, wide) { open(true) }
-            }
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(HEADER_GAP)) {
             if (wide) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TrackTitle(track, wide = true, Modifier.weight(1f).fillMaxWidth()) { open(false) }
+                Row(Modifier.height(Dimens.touch), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (beat) {
+                        Spacer(Modifier.width(BADGE_W_WIDE))
                         Spacer(Modifier.weight(1f))
                         Spacer(Modifier.weight(1f))
                     } else {
+                        InputBadge(track, BADGE_W_WIDE) { open(true) }
                         InputToggles(track, controller)
                     }
                     MixToggles(track, controller)
                 }
             } else {
-                if (!beat) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { InputToggles(track, controller) }
-                    Spacer(Modifier.height(2.dp))
+                if (beat) {
+                    TrackTitle(track, wide = false, Modifier.weight(1f).fillMaxWidth()) { open(false) }
+                } else {
+                    // A tall lane keeps the name at the top and the toggles at
+                    // the bottom, where every other lane has them.
+                    Row(Modifier.height(Dimens.touch).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        TrackTitle(track, wide = false, Modifier.weight(1f).fillMaxHeight()) { open(false) }
+                        InputBadge(track, BADGE_W) { open(true) }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Row(Modifier.height(Dimens.touch), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        InputToggles(track, controller)
+                    }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { MixToggles(track, controller) }
+                Row(Modifier.height(Dimens.touch), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    MixToggles(track, controller)
+                }
             }
         }
         Spacer(Modifier.width(4.dp))
@@ -347,78 +388,69 @@ private fun TrackHeader(
     }
 }
 
-/** Name and input badge: stacked when the header has the height, side by
- *  side when it does not. */
+/**
+ * The track's name, and for a beat track how many sounds its kit has. The
+ * whole box is the way into the inspector. Portrait gives a long name two
+ * lines; a wide header has the room for one.
+ */
 @Composable
-private fun BoxScope.AudioTitle(track: Track, wide: Boolean, onInput: () -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (!wide && maxHeight >= 38.dp) {
-            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-                TrackName(track.name, Modifier.fillMaxWidth())
-                InputBadge(track, onInput)
-            }
-        } else {
-            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                TrackName(track.name, Modifier.weight(1f))
-                InputBadge(track, onInput)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BoxScope.BeatTitle(track: Track, wide: Boolean) {
-    val n = track.samples.size
-    val sounds = when (n) {
+private fun TrackTitle(track: Track, wide: Boolean, modifier: Modifier, onOpen: () -> Unit) {
+    val sounds = if (track.kind != TRACK_BEAT) null else when (val n = track.samples.size) {
         0 -> "No sounds"
         1 -> "1 sound"
         else -> "$n sounds"
     }
+    val nameStyle = NameStyle.copy(fontSize = 13.sp, lineHeight = 15.sp)
     val soundsStyle = DimStyle.copy(fontSize = 11.sp)
-    if (wide) {
-        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            TrackName(track.name, Modifier.weight(1f))
-            Text(sounds, style = soundsStyle, maxLines = 1)
-        }
-    } else {
-        Column(Modifier.fillMaxSize().padding(top = 2.dp)) {
-            TrackName(track.name, Modifier.fillMaxWidth())
-            Text(sounds, style = soundsStyle, maxLines = 1)
+    Box(
+        modifier
+            .heightIn(min = 24.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(onClick = onOpen),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (wide) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(track.name, style = nameStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (sounds != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(sounds, style = soundsStyle, maxLines = 1)
+                }
+            }
+        } else {
+            Column {
+                Text(track.name, style = nameStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (sounds != null) Text(sounds, style = soundsStyle, maxLines = 1)
+            }
         }
     }
 }
 
+/** What lands on the track when Rec goes: a full-height button for the
+ *  input picker. Red while armed, yellow when nothing can. */
 @Composable
-private fun TrackName(name: String, modifier: Modifier) {
-    Text(
-        name,
-        style = NameStyle.copy(fontSize = 13.sp),
-        modifier = modifier,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
-}
-
-/** What lands on the track when Rec goes. Red while armed, yellow when
- *  nothing can. */
-@Composable
-private fun InputBadge(track: Track, onClick: () -> Unit) {
-    val label = inputBadge(track)
+private fun InputBadge(track: Track, width: Dp, onClick: () -> Unit) {
     val color = when {
         track.inputDevice == InputDevice.None || track.inputMode == INPUT_NONE -> Colors.warn
         track.armed -> Colors.red
         else -> Colors.dim
     }
-    Text(
-        "$label ▾",
-        style = LabelStyle.copy(color = color, fontSize = 10.sp, letterSpacing = 0.5.sp),
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 2.dp),
-    )
+    val shape = RoundedCornerShape(Dimens.corner)
+    Box(
+        Modifier
+            .size(width = width, height = Dimens.touch)
+            .clip(shape)
+            .border(1.dp, Colors.line, shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "${inputBadge(track)} ▾",
+            style = LabelStyle.copy(color = color, fontSize = 11.sp, letterSpacing = 0.sp),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
 }
 
 @Composable
@@ -431,7 +463,7 @@ private fun RowScope.InputToggles(track: Track, controller: SongController) {
 
 @Composable
 private fun RowScope.MixToggles(track: Track, controller: SongController) {
-    Toggle("M", track.mute, Colors.accent, modifier = Modifier.weight(1f).height(Dimens.touch), onClick = {
+    Toggle("M", track.mute, Colors.warn, modifier = Modifier.weight(1f).height(Dimens.touch), onClick = {
         controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
     })
     Toggle("S", track.solo, Colors.green, modifier = Modifier.weight(1f).height(Dimens.touch), onClick = {
@@ -445,22 +477,6 @@ internal fun MonitorToggle(track: Track, controller: SongController, size: Dp, m
     Toggle("", track.monitor, Colors.green, size = size, modifier = modifier, icon = HeadphonesGlyph, onClick = {
         controller.setMonitor(track.id, !track.monitor)
     })
-}
-
-/** The way into a track's effects, where the mixer shows one. */
-@Composable
-internal fun FxChip(onClick: () -> Unit) {
-    val shape = RoundedCornerShape(Dimens.corner)
-    Box(
-        Modifier
-            .clip(shape)
-            .border(1.dp, Colors.accent.copy(alpha = 0.55f), shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("FX", style = LabelStyle.copy(color = Colors.accent, fontSize = 11.sp, letterSpacing = 1.sp), maxLines = 1)
-    }
 }
 
 // Levels move at the poll rate, so the read lives in its own composable: a
@@ -484,20 +500,17 @@ internal fun LiveMeter(
     )
 }
 
-// The badge names the source device, not just a channel number:
-// "DUO 1", "DUO 1+2", "MIC", "NO INPUT".
+// The badge names the channel, "1", "2", "1+2", or "MIC" for the phone's
+// own microphone; the device itself is in the top bar.
 internal fun inputBadge(track: Track): String {
     val device = track.inputDevice
-    if (device == InputDevice.None || track.inputMode == INPUT_NONE) return "NO INPUT"
+    if (device == InputDevice.None || track.inputMode == INPUT_NONE) return "OFF"
     if (device == InputDevice.Mic) return "MIC"
-    val name = (device as? InputDevice.Usb)?.name ?: "USB"
-    val short = shortDeviceName(name)
-    val ch = when (track.inputMode) {
+    return when (track.inputMode) {
         INPUT_CH2 -> "2"
         INPUT_STEREO -> "1+2"
         else -> "1"
     }
-    return if (short.isEmpty()) "IN $ch" else "$short $ch"
 }
 
 // ------------------------------------------------------------- pattern ghost --
@@ -505,13 +518,18 @@ internal fun inputBadge(track: Track): String {
 /**
  * On the selected beat lane: one tap puts the pattern Beats last showed (or
  * the track's first) at the bar after the playhead. Reads the playhead, so it
- * lives apart from the lane and only it follows the clock.
+ * lives apart from the lane and only it follows the clock. While a finger is
+ * on it the bar holds still, so the target cannot move under the tap.
  */
 @Composable
 private fun BoxScope.PatternGhost(controller: SongController, ui: SongUi, tl: TimelineState, track: Track) {
     val patterns = controller.patternsFor(track.id)
     val pattern = patterns.find { it.id == ui.beatsPattern } ?: patterns.firstOrNull() ?: return
-    val bar = controller.nextBarIndex()
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val live = controller.nextBarIndex()
+    val held = remember(pressed) { live }
+    val bar = if (pressed) held else live
     val x = tl.pxOf(controller.song.barStartFrame(bar))
     if (x < 0f || x > tl.laneWidthPx - with(LocalDensity.current) { 48.dp.toPx() }) return
     val shape = RoundedCornerShape(Dimens.corner)
@@ -530,7 +548,7 @@ private fun BoxScope.PatternGhost(controller: SongController, ui: SongUi, tl: Ti
                     style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 7f))),
                 )
             }
-            .clickable { controller.placePatternAt(track.id, pattern.id, bar) }
+            .clickable(press, LocalIndication.current) { controller.placePatternAt(track.id, pattern.id, bar) }
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -580,9 +598,11 @@ internal fun MessageBanner(controller: SongController, modifier: Modifier) {
     Box(
         modifier
             .background(Colors.raised, shape)
-            .border(1.dp, Colors.accent, shape)
+            .border(1.dp, Colors.line, shape)
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Text(msg, style = BodyStyle.copy(color = Colors.accent), maxLines = 2)
+        // Neutral: the same line carries news, refusals and errors, and the
+        // text says which.
+        Text(msg, style = BodyStyle.copy(color = Colors.text), maxLines = 2)
     }
 }
