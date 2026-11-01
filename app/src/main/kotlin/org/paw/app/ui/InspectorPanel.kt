@@ -257,7 +257,7 @@ internal fun PanelLinkRow(label: String, detail: String, onClick: () -> Unit, mo
 private fun InputList(controller: SongController, ui: SongUi, track: Track) {
     val usbOptions = controller.inputOptions.filter { it.device.isUsb }
     fun choose(device: InputDevice, mode: Int) {
-        controller.updateTrack(track.id) { it.copy(inputDevice = device, inputMode = mode) }
+        controller.setInput(track.id, device, mode)
     }
     SectionLabel("Input", Modifier.padding(top = 4.dp, bottom = 4.dp))
     usbOptions.forEachIndexed { index, opt ->

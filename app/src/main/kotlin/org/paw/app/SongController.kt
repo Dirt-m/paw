@@ -676,6 +676,10 @@ class SongController(
     // interval old, and read-modify-writing it across that window races.
 
     fun playPause() {
+        // The song and a pattern loop never play over each other: the engine
+        // only pauses a preview under a running transport, and would bring it
+        // back by itself when the song stops.
+        stopPreview()
         // The answer is the state the engine settled on; adopting it saves
         // the button a poll interval of looking wrong.
         val transport = Engine.transportPlayPause()
@@ -696,6 +700,7 @@ class SongController(
     /** Record button: starts capture (from stop or as punch-in), or punches
      *  out. Which one it is, is the engine's call. */
     fun toggleRecord() {
+        stopPreview()
         // Model-side preconditions, and only when this can't be a punch-out: a
         // track disarmed mid-take must not block stopping it. The engine
         // enforces the real rule either way; these just word it better.
@@ -830,6 +835,21 @@ class SongController(
      * disarms those and says so. Channels of the same device can be armed
      * together.
      */
+    /**
+     * Points an audio track at an input. An armed track keeps the one device
+     * rule: other armed tracks on a different device are disarmed, as when
+     * arming.
+     */
+    fun setInput(trackId: Int, device: InputDevice, mode: Int) {
+        val track = song.track(trackId) ?: return
+        if (track.inputDevice == device && track.inputMode == mode) return
+        updateTrack(trackId) { it.copy(inputDevice = device, inputMode = mode) }
+        if (track.armed) {
+            setArmed(trackId, false)
+            setArmed(trackId, true)
+        }
+    }
+
     fun setArmed(trackId: Int, on: Boolean) {
         val track = song.track(trackId) ?: return
         if (track.kind != TRACK_AUDIO || track.armed == on) return
@@ -997,6 +1017,11 @@ class SongController(
      *  "recordings are immutable". Refused while any clip references it, so a
      *  delete can never silence the timeline; the screen confirms first. */
     fun deleteRecording(entry: TakeEntry): Boolean {
+        // A take being written has no clip yet and would read as unused.
+        if (status.recording || status.recPending) {
+            message = "Recordings can be deleted once recording stops"
+            return false
+        }
         val used = song.tracks.any { t -> t.clips.any { it.take == entry.rel } }
         if (used) {
             message = "Recording is on the timeline. Remove its clips first"
@@ -1236,6 +1261,8 @@ class SongController(
      *  preview when anything they depend on changed. */
     private fun syncSampler() {
         val s = song
+        // An undo can take away the pattern that is looping.
+        previewing?.let { if (s.pattern(it) == null) stopPreview() }
         val bank = bankOf(s)
         val bankKey = bank.map { (tid, smp) -> Triple(tid, smp.take, smp.srcStart to smp.length) }
         val hitsKey = listOf(s.tempoBpm, s.patterns, s.tracks.filter { it.kind == TRACK_BEAT }.map { it.clips to it.samples })
@@ -1282,6 +1309,11 @@ class SongController(
 
     /** Loops [patternId] through [trackId]'s kit with the transport stopped. */
     fun startPreview(trackId: Int, patternId: Int) {
+        // Stopping the transport for a preview would end a take mid-performance.
+        if (status.recording || status.recPending) {
+            message = "Stop recording to play the pattern on its own"
+            return
+        }
         if (status.transport != TRANSPORT_STOPPED) stopAll()
         previewing = patternId
         previewTrack = trackId
@@ -1310,7 +1342,9 @@ class SongController(
     fun addBeatTrack(): Int {
         pushUndo()
         val id = song.nextTrackId
-        val n = song.tracks.count { it.kind == TRACK_BEAT } + 1
+        val names = song.tracks.mapTo(HashSet()) { it.name }
+        val n = generateSequence(song.tracks.count { it.kind == TRACK_BEAT } + 1) { it + 1 }
+            .first { "Beats $it" !in names }
         val track = Track(
             id = id, name = "Beats $n", kind = TRACK_BEAT,
             inputDevice = InputDevice.None, inputMode = INPUT_NONE,
