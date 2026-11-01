@@ -3,12 +3,13 @@ package org.paw.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -17,39 +18,50 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.log10
+import kotlinx.coroutines.launch
 import org.paw.app.SongController
 import org.paw.app.model.MASTER_TRACK_ID
 import org.paw.app.model.Track
-import org.paw.app.model.TRACK_BEAT
 
-// MIX view: one channel strip per track, master pinned on the right. Strip
-// widths are computed so a whole number of strips fills the space beside the
-// master (no half strip peeking out). Tall windows stack a strip's controls
-// under the fader; short ones (phone landscape) put them beside it so the fader
-// keeps its travel.
+// MIX mode: a channel strip per track, master pinned on the right. Every
+// strip, master included, gets the same width, computed so a whole number of
+// strips fills the row exactly; the strips scroll and snap a strip at a time.
+// Tall windows put a row of track chips on top to jump along a long song and
+// to add tracks. Short ones (phone landscape) spend all the height on the
+// fader: mute and solo sit beside it, and adding lives at the end of the row.
 
-private val STRIP_GAP = 6.dp
+private val GAP = 6.dp
+private val STRIP_PAD = 4.dp
 private val STRIP_MIN_TALL = 92.dp
-private val STRIP_MAX_TALL = 128.dp
-private val STRIP_MIN_SHORT = 150.dp
-private val STRIP_MAX_SHORT = 190.dp
-private val MASTER_W_TALL = 88.dp
-private val MASTER_W_SHORT = 132.dp
+private val STRIP_MIN_SHORT = 112.dp
+private val INDEX_ROW_H = 52.dp
+private val READOUT_H = 28.dp
+private val ControlShape = RoundedCornerShape(Dimens.corner)
 
 @Composable
 fun MixerView(
@@ -57,273 +69,429 @@ fun MixerView(
     ui: SongUi,
     short: Boolean,
 ) {
-    val onOpenTrack: (Int) -> Unit = { ui.open(SongPanel.Inspector(it)) }
-    val song = controller.song
-    val scroll = rememberScrollState()
-    val masterW = if (short) MASTER_W_SHORT else MASTER_W_TALL
-    BoxWithConstraints(Modifier.fillMaxSize().background(Colors.bg)) {
-        // Fit as many strips as the minimum width allows, then widen them to
-        // fill the row exactly: leading pad, the gaps between, and a trailing
-        // gap so the next strip starts precisely at the master's edge.
-        val avail = maxWidth - masterW - STRIP_GAP
-        val minW = if (short) STRIP_MIN_SHORT else STRIP_MIN_TALL
-        val maxW = if (short) STRIP_MAX_SHORT else STRIP_MAX_TALL
-        val n = ((avail + STRIP_GAP) / (minW + STRIP_GAP)).toInt().coerceAtLeast(1)
-        val stripW = ((avail - STRIP_GAP * n) / n).coerceIn(minW, maxW)
+    val tracks = controller.song.tracks
+    val strips = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val openTrack: (Int) -> Unit = {
+        controller.selectedTrack = it
+        ui.open(SongPanel.Inspector(it))
+    }
+    val openFx: (Int) -> Unit = {
+        controller.selectedTrack = it
+        ui.open(SongPanel.Inspector(it, InspectorTab.Fx))
+    }
+    // A new track lands at the end of the row; bring it on screen.
+    val addAudio = {
+        controller.addTrack()
+        scope.launch { strips.animateScrollToItem(controller.song.tracks.lastIndex) }
+        Unit
+    }
+    val addBeat = {
+        controller.addBeatTrack()
+        scope.launch { strips.animateScrollToItem(controller.song.tracks.lastIndex) }
+        Unit
+    }
 
-        Row(Modifier.fillMaxSize()) {
-            Row(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .horizontalScroll(scroll)
-                    .padding(start = STRIP_GAP, top = STRIP_GAP, bottom = STRIP_GAP),
-                horizontalArrangement = Arrangement.spacedBy(STRIP_GAP),
-            ) {
-                song.tracks.forEach { track ->
-                    key(track.id) { ChannelStrip(track, controller, onOpenTrack, short, stripW) }
-                }
-                Box(
-                    Modifier
-                        .width(stripW)
-                        .fillMaxHeight()
-                        .border(1.dp, Colors.line)
-                        .clickable { controller.addTrack() },
-                    contentAlignment = Alignment.Center,
+    Column(Modifier.fillMaxSize().background(Colors.bg)) {
+        if (!short) {
+            StripIndex(tracks, strips, controller.selectedTrack, addAudio, addBeat) { i ->
+                scope.launch { strips.animateScrollToItem(i) }
+            }
+        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            // n track strips and the master share the width, with a gap
+            // before, between and after them all.
+            val minW = if (short) STRIP_MIN_SHORT else STRIP_MIN_TALL
+            val slots = ((maxWidth - GAP) / (minW + GAP)).toInt().coerceAtLeast(2)
+            val stripW = (maxWidth - GAP * (slots + 1)) / slots
+            Row(Modifier.fillMaxSize()) {
+                LazyRow(
+                    state = strips,
+                    flingBehavior = rememberSnapFlingBehavior(strips),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentPadding = PaddingValues(start = GAP, top = GAP, bottom = GAP, end = GAP),
+                    horizontalArrangement = Arrangement.spacedBy(GAP),
                 ) {
-                    Text(
-                        "+\nAdd\ntrack",
-                        style = ButtonStyle.copy(color = Colors.accent, lineHeight = 20.sp),
-                        textAlign = TextAlign.Center,
+                    itemsIndexed(tracks, key = { _, t -> t.id }) { _, track ->
+                        ChannelStrip(
+                            track, controller, short, stripW,
+                            selected = controller.selectedTrack == track.id,
+                            onOpen = { openTrack(track.id) },
+                            onFx = { openFx(track.id) },
+                        )
+                    }
+                    item(key = "add") { AddStrip(stripW, addAudio, addBeat) }
+                }
+                Box(Modifier.padding(top = GAP, bottom = GAP, end = GAP)) {
+                    MasterStrip(
+                        controller, short, stripW,
+                        selected = controller.selectedTrack == MASTER_TRACK_ID,
+                        onOpen = { openTrack(MASTER_TRACK_ID) },
+                        onFx = { openFx(MASTER_TRACK_ID) },
                     )
                 }
             }
-            MasterStrip(controller, onOpenTrack, short, masterW)
         }
     }
 }
 
+// ------------------------------------------------------------- strip index --
+
+/**
+ * Every track as a chip; the ones whose strips are on screen are outlined.
+ * A tap scrolls the strips there. The add chips close the row.
+ */
 @Composable
-private fun StripName(
-    name: String,
-    color: androidx.compose.ui.graphics.Color,
-    showFx: Boolean = true,
-    onClick: () -> Unit,
+private fun StripIndex(
+    tracks: List<Track>,
+    strips: LazyListState,
+    selected: Int?,
+    onAddAudio: () -> Unit,
+    onAddBeat: () -> Unit,
+    onJump: (Int) -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(Dimens.touch)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp),
+    val chips = rememberLazyListState()
+    // A strip counts as shown when most of it is inside the row.
+    val shown by remember(strips) {
+        derivedStateOf {
+            val info = strips.layoutInfo
+            info.visibleItemsInfo
+                .filter { it.key is Int }
+                .filter {
+                    val left = maxOf(it.offset, info.viewportStartOffset)
+                    val right = minOf(it.offset + it.size, info.viewportEndOffset)
+                    right - left > it.size / 2
+                }
+                .map { it.index }
+                .toSet()
+        }
+    }
+    // Keep the outlined chips in view while the strips scroll.
+    val first = shown.minOrNull()
+    LaunchedEffect(first) {
+        if (first == null) return@LaunchedEffect
+        val seen = chips.layoutInfo.visibleItemsInfo
+        val firstSeen = seen.firstOrNull()?.index ?: 0
+        val lastSeen = seen.lastOrNull()?.index ?: 0
+        val lastShown = shown.maxOrNull() ?: first
+        if (first < firstSeen || lastShown >= lastSeen) chips.animateScrollToItem(first)
+    }
+    LazyRow(
+        state = chips,
+        modifier = Modifier.fillMaxWidth().height(INDEX_ROW_H).background(Colors.panel),
+        contentPadding = PaddingValues(horizontal = GAP),
+        horizontalArrangement = Arrangement.spacedBy(GAP),
         verticalAlignment = Alignment.CenterVertically,
+    ) {
+        itemsIndexed(tracks, key = { _, t -> t.id }) { i, track ->
+            IndexChip(
+                track.name,
+                outlined = i in shown,
+                selected = track.id == selected,
+                onClick = { onJump(i) },
+            )
+        }
+        item(key = "add-audio") { AddChip("+ Track", onAddAudio) }
+        item(key = "add-beat") { AddChip("+ Beat", onAddBeat) }
+    }
+}
+
+@Composable
+private fun IndexChip(name: String, outlined: Boolean, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .height(Dimens.touch)
+            .widthIn(min = 48.dp, max = 108.dp)
+            .clip(ControlShape)
+            .background(if (outlined) Colors.raised else Colors.bg)
+            .border(1.dp, if (outlined) Colors.accent.copy(alpha = 0.7f) else Colors.line, ControlShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             name,
-            style = NameStyle.copy(color = color, fontSize = 13.sp),
-            modifier = Modifier.weight(1f),
+            style = ButtonStyle.copy(
+                color = if (selected) Colors.accent else if (outlined) Colors.text else Colors.dim,
+                fontSize = 13.sp,
+                letterSpacing = 0.2.sp,
+            ),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (showFx) FxChip(onClick)
     }
 }
 
-/** Fader beside meter, dB under them; the part every strip shares. */
+/** Plain outline, so it does not read as one of the strips on screen. */
 @Composable
-private fun FaderBlock(
-    controller: SongController,
-    trackId: Int,
-    gain: Float,
-    modifier: Modifier = Modifier,
-) {
-    var liveGain by remember { mutableStateOf<Float?>(null) }
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GainSlider(
-                controller, trackId, gain,
-                vertical = true,
-                modifier = Modifier.fillMaxHeight(),
-                onLive = { liveGain = it },
-            )
-            LiveMeter(controller, trackId, Modifier.fillMaxHeight(), vertical = true, thickness = 10.dp)
-        }
-        Text(
-            formatDb(liveGain ?: gain),
-            style = MonoStyle.copy(fontSize = 11.sp),
-            modifier = Modifier.padding(top = 2.dp),
-            maxLines = 1,
-        )
+private fun AddChip(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .height(Dimens.touch)
+            .clip(ControlShape)
+            .border(1.dp, Colors.line, ControlShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = ButtonStyle.copy(color = Colors.accent), maxLines = 1, softWrap = false)
     }
 }
 
-/**
- * Arm, monitor, mute and solo. Beside the fader (landscape) they make one
- * column, every button the full width; under it (portrait) they pair up.
- */
-@Composable
-private fun TrackButtons(
-    track: Track,
-    controller: SongController,
-    column: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    // Stacked buttons stretch to share the column, so they may be shorter
-    // than a free-standing one.
-    val size = if (column) 26.dp else 36.dp
-    // A beat track has no input: its arm and monitor slots stay empty, so the
-    // strip keeps the same shape as its neighbours.
-    val arm: @Composable (Modifier) -> Unit = if (track.kind == TRACK_BEAT) { m -> Box(m) } else { m ->
-        Toggle("●", track.armed, Colors.red, fontSize = 14.sp, size = size, modifier = m, onClick = {
-            controller.updateTrack(track.id) { it.copy(armed = !it.armed) }
-        })
-    }
-    val monitor: @Composable (Modifier) -> Unit =
-        if (track.kind == TRACK_BEAT) { m -> Box(m) } else { m -> MonitorToggle(track, controller, size, m) }
-    val mute: @Composable (Modifier) -> Unit = { m ->
-        Toggle("M", track.mute, Colors.accent, size = size, modifier = m, onClick = {
-            controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
-        })
-    }
-    val solo: @Composable (Modifier) -> Unit = { m ->
-        Toggle("S", track.solo, Colors.green, size = size, modifier = m, onClick = {
-            controller.updateTrack(track.id) { it.copy(solo = !it.solo) }
-        })
-    }
-    if (column) {
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            arm(Modifier.fillMaxWidth().weight(1f))
-            monitor(Modifier.fillMaxWidth().weight(1f))
-            mute(Modifier.fillMaxWidth().weight(1f))
-            solo(Modifier.fillMaxWidth().weight(1f))
-        }
-    } else {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            arm(Modifier.weight(1f))
-            monitor(Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            mute(Modifier.weight(1f))
-            solo(Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun PanRow(track: Track, controller: SongController) {
-    var livePan by remember { mutableStateOf<Float?>(null) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        PanSlider(
-            controller, track.id, track.pan,
-            modifier = Modifier.weight(1f),
-            onLive = { livePan = it },
-        )
-        Text(
-            formatPan(livePan ?: track.pan),
-            style = MonoDimStyle.copy(fontSize = 10.sp),
-            modifier = Modifier.width(26.dp),
-            textAlign = TextAlign.End,
-        )
-    }
-}
+// ------------------------------------------------------------------ strips --
 
 @Composable
 private fun StripFrame(
     width: Dp,
-    accent: androidx.compose.ui.graphics.Color,
+    selected: Boolean,
+    master: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val border = when {
+        selected -> Colors.accent
+        master -> Colors.accent.copy(alpha = 0.4f)
+        else -> Colors.line
+    }
     Column(
         Modifier
             .width(width)
             .fillMaxHeight()
             .background(Colors.panel)
-            .border(1.dp, accent)
-            .padding(6.dp),
+            .border(if (selected) 2.dp else 1.dp, border)
+            .padding(STRIP_PAD),
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content,
     )
+}
+
+/** The name, in up to [lines] lines: opens the track's inspector. */
+@Composable
+private fun StripName(
+    name: String,
+    color: Color,
+    lines: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .height(Dimens.touch)
+            .clip(ControlShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            name,
+            style = NameStyle.copy(color = color, fontSize = 13.sp, lineHeight = 15.sp),
+            maxLines = lines,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Opens the FX tab. Shows how many effects are on the track, or offers one. */
+@Composable
+private fun FxButton(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val on = count > 0
+    Box(
+        modifier
+            .height(Dimens.touch)
+            .clip(ControlShape)
+            .background(if (on) Colors.accent.copy(alpha = 0.14f) else Color.Transparent)
+            .border(1.dp, if (on) Colors.accent.copy(alpha = 0.7f) else Colors.line, ControlShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (on) "FX $count" else "+ FX",
+            style = LabelStyle.copy(color = if (on) Colors.accent else Colors.dim, fontSize = 12.sp, letterSpacing = 1.sp),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/** Fader and meter side by side; the drag reports its live gain to [onLive]. */
+@Composable
+private fun Fader(
+    controller: SongController,
+    trackId: Int,
+    gain: Float,
+    onLive: (Float?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        GainSlider(controller, trackId, gain, vertical = true, modifier = Modifier.fillMaxHeight(), onLive = onLive)
+        LiveMeter(controller, trackId, Modifier.fillMaxHeight(), vertical = true, thickness = 8.dp)
+    }
+}
+
+private fun dbNumber(gain: Float): String =
+    if (gain <= 0f) "-inf" else "%+.1f".format(20f * log10(gain))
+
+/**
+ * The fader's value; a double tap puts it back to 0 dB. [stacked] sets the
+ * unit under the number for a narrow column.
+ */
+@Composable
+private fun DbReadout(
+    controller: SongController,
+    trackId: Int,
+    gain: Float,
+    stacked: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val reset = { controller.updateTrack(trackId) { it.copy(gain = 1f) } }
+    if (stacked) {
+        Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+            ValueReadout(dbNumber(gain), style = MonoStyle.copy(fontSize = 12.sp), onReset = reset)
+            Text("dB", style = LabelStyle.copy(fontSize = 10.sp, letterSpacing = 1.sp))
+        }
+    } else {
+        Box(modifier.height(READOUT_H), contentAlignment = Alignment.Center) {
+            ValueReadout(formatDb(gain), style = MonoStyle.copy(fontSize = 12.sp), onReset = reset)
+        }
+    }
+}
+
+/** Pan slider with its value beside it; a double tap on either centres it. */
+@Composable
+private fun PanRow(track: Track, controller: SongController, modifier: Modifier = Modifier) {
+    var livePan by remember { mutableStateOf<Float?>(null) }
+    Row(modifier.height(Dimens.touch), verticalAlignment = Alignment.CenterVertically) {
+        PanSlider(controller, track.id, track.pan, Modifier.weight(1f), onLive = { livePan = it })
+        ValueReadout(
+            formatPan(livePan ?: track.pan),
+            style = MonoDimStyle.copy(fontSize = 11.sp, textAlign = TextAlign.End),
+            modifier = Modifier.width(26.dp),
+            onReset = { controller.updateTrack(track.id) { it.copy(pan = 0f) } },
+        )
+    }
+}
+
+@Composable
+private fun MuteToggle(track: Track, controller: SongController, modifier: Modifier = Modifier) {
+    Toggle("M", track.mute, Colors.accent, modifier = modifier, onClick = {
+        controller.updateTrack(track.id) { it.copy(mute = !it.mute) }
+    })
+}
+
+@Composable
+private fun SoloToggle(track: Track, controller: SongController, modifier: Modifier = Modifier) {
+    Toggle("S", track.solo, Colors.green, modifier = modifier, onClick = {
+        controller.updateTrack(track.id) { it.copy(solo = !it.solo) }
+    })
 }
 
 @Composable
 private fun ChannelStrip(
     track: Track,
     controller: SongController,
-    onOpenTrack: (Int) -> Unit,
     short: Boolean,
     width: Dp,
+    selected: Boolean,
+    onOpen: () -> Unit,
+    onFx: () -> Unit,
 ) {
-    StripFrame(width, Colors.line) {
-        StripName(track.name, Colors.text) { onOpenTrack(track.id) }
-        val badge = @Composable {
-            Text(
-                if (track.armed) inputBadge(track) else " ",
-                style = LabelStyle.copy(color = Colors.red, fontSize = 10.sp, letterSpacing = 0.5.sp),
-                maxLines = 1,
-            )
-        }
+    var liveGain by remember { mutableStateOf<Float?>(null) }
+    val gain = liveGain ?: track.gain
+    val nameColor = if (selected) Colors.accent else Colors.text
+    StripFrame(width, selected) {
         if (short) {
-            // Landscape is short: the four buttons share the height beside
-            // the fader, and pan takes the full width underneath.
-            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FaderBlock(controller, track.id, track.gain, Modifier.fillMaxHeight())
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    badge()
-                    Spacer(Modifier.height(4.dp))
-                    TrackButtons(track, controller, column = true, modifier = Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                StripName(track.name, nameColor, 2, onOpen, Modifier.weight(1f))
+                FxButton(track.effects.size, onFx)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Fader(controller, track.id, track.gain, { liveGain = it }, Modifier.fillMaxHeight())
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    MuteToggle(track, controller, Modifier.fillMaxWidth())
+                    SoloToggle(track, controller, Modifier.fillMaxWidth())
+                    Spacer(Modifier.weight(1f))
+                    DbReadout(controller, track.id, gain, stacked = true, modifier = Modifier.fillMaxWidth())
                 }
             }
-            PanRow(track, controller)
+            Spacer(Modifier.height(4.dp))
+            PanRow(track, controller, Modifier.fillMaxWidth())
         } else {
-            badge()
+            StripName(track.name, nameColor, 2, onOpen, Modifier.fillMaxWidth())
             Spacer(Modifier.height(4.dp))
-            FaderBlock(controller, track.id, track.gain, Modifier.weight(1f))
-            PanRow(track, controller)
+            FxButton(track.effects.size, onFx, Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Fader(controller, track.id, track.gain, { liveGain = it }, Modifier.weight(1f))
+            DbReadout(controller, track.id, gain, stacked = false, modifier = Modifier.fillMaxWidth())
+            PanRow(track, controller, Modifier.fillMaxWidth())
             Spacer(Modifier.height(4.dp))
-            TrackButtons(track, controller, column = false)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                MuteToggle(track, controller, Modifier.weight(1f))
+                SoloToggle(track, controller, Modifier.weight(1f))
+            }
         }
     }
 }
 
+/**
+ * The master: the same shape as a track strip so the faders line up, with
+ * no pan and no solo.
+ */
 @Composable
 private fun MasterStrip(
     controller: SongController,
-    onOpenTrack: (Int) -> Unit,
     short: Boolean,
     width: Dp,
+    selected: Boolean,
+    onOpen: () -> Unit,
+    onFx: () -> Unit,
 ) {
     val master = controller.song.master
-    val mute = @Composable {
-        Toggle("M", master.mute, Colors.accent, size = 36.dp, modifier = Modifier.fillMaxWidth(), onClick = {
-            controller.updateTrack(MASTER_TRACK_ID) { it.copy(mute = !it.mute) }
-        })
-    }
-    Box(Modifier.padding(STRIP_GAP)) {
-        StripFrame(width - STRIP_GAP * 2, Colors.accent.copy(alpha = 0.5f)) {
-            // The portrait master strip is too narrow for its name and FX
-            // both; the name row opens the same screen.
-            StripName("Master", Colors.accent, showFx = short) { onOpenTrack(MASTER_TRACK_ID) }
-            if (short) {
-                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FaderBlock(controller, MASTER_TRACK_ID, master.gain, Modifier.fillMaxHeight())
-                    Column(Modifier.weight(1f).fillMaxHeight()) {
-                        Text(" ", style = LabelStyle.copy(fontSize = 10.sp))
-                        Spacer(Modifier.height(4.dp))
-                        mute()
-                    }
-                }
-                // The track strips' pan row, so the faders line up.
-                Spacer(Modifier.height(36.dp))
-            } else {
-                Text(" ", style = LabelStyle.copy(fontSize = 10.sp))
-                Spacer(Modifier.height(4.dp))
-                FaderBlock(controller, MASTER_TRACK_ID, master.gain, Modifier.weight(1f))
-                // Same height as a track strip's pan row and arm button, so
-                // the master fader lines up with the others.
-                Spacer(Modifier.height(36.dp + 4.dp + 36.dp + 4.dp))
-                mute()
+    var liveGain by remember { mutableStateOf<Float?>(null) }
+    val gain = liveGain ?: master.gain
+    StripFrame(width, selected, master = true) {
+        if (short) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                StripName("Master", Colors.accent, 1, onOpen, Modifier.weight(1f))
+                FxButton(master.effects.size, onFx)
             }
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Fader(controller, MASTER_TRACK_ID, master.gain, { liveGain = it }, Modifier.fillMaxHeight())
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    MuteToggle(master, controller, Modifier.fillMaxWidth())
+                    Spacer(Modifier.weight(1f))
+                    DbReadout(controller, MASTER_TRACK_ID, gain, stacked = true, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            Spacer(Modifier.height(4.dp + Dimens.touch))
+        } else {
+            StripName("Master", Colors.accent, 2, onOpen, Modifier.fillMaxWidth())
+            Spacer(Modifier.height(4.dp))
+            FxButton(master.effects.size, onFx, Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Fader(controller, MASTER_TRACK_ID, master.gain, { liveGain = it }, Modifier.weight(1f))
+            DbReadout(controller, MASTER_TRACK_ID, gain, stacked = false, modifier = Modifier.fillMaxWidth())
+            // The track strips' pan row, so the faders end level.
+            Spacer(Modifier.height(Dimens.touch + 4.dp))
+            MuteToggle(master, controller, Modifier.fillMaxWidth())
         }
+    }
+}
+
+/** The end of the row: a new audio or beat track. */
+@Composable
+private fun AddStrip(width: Dp, onAddAudio: () -> Unit, onAddBeat: () -> Unit) {
+    Column(
+        Modifier
+            .width(width)
+            .fillMaxHeight()
+            .border(1.dp, Colors.line)
+            .padding(STRIP_PAD),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        AppButton("+ Track", accent = Colors.accent, onClick = onAddAudio, padding = 6.dp, modifier = Modifier.fillMaxWidth())
+        AppButton("+ Beat", accent = Colors.accent, onClick = onAddBeat, padding = 6.dp, modifier = Modifier.fillMaxWidth())
     }
 }
