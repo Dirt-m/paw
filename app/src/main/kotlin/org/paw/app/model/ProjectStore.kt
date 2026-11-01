@@ -108,6 +108,35 @@ class ProjectStore(
         return song
     }
 
+    /**
+     * A new song named for the moment it was started ("Idea 1 Nov, 14.05",
+     * with " 2", " 3" appended when that is taken) holding one audio track on
+     * [input], or on the phone mic when there is none. The track starts armed
+     * only when [armed] is true, so the song can record straight away.
+     */
+    fun createIdea(input: InputDevice?, armed: Boolean): Song {
+        val base = "Idea " + java.text.SimpleDateFormat("d MMM, HH.mm", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        var name = base
+        var n = 2
+        while (dirFor(name).exists()) name = "$base ${n++}"
+        ensureRoot()
+        val dir = dirFor(name)
+        audioDir(dir)
+        val song = Song(
+            name = name,
+            tracks = listOf(
+                Track(
+                    id = 1, name = "Track 1", inputDevice = input ?: InputDevice.Mic,
+                    inputMode = INPUT_CH1, armed = armed,
+                ),
+            ),
+            nextTrackId = 2,
+        )
+        save(dir, song)
+        return song
+    }
+
     /** Renames the song and its folder. False if the name is taken or invalid. */
     fun rename(dir: File, newName: String): Boolean {
         val song = load(dir) ?: return false
@@ -206,6 +235,10 @@ class ProjectStore(
         return failed
     }
 
+    // Commas and dots are kept so an idea's folder reads like its name; a
+    // leading dot would hide the folder and a trailing one upsets Windows.
     private fun sanitize(name: String): String =
-        name.trim().replace(Regex("[^A-Za-z0-9 _-]"), "_").ifBlank { "Song" }
+        name.trim().replace(Regex("[^A-Za-z0-9 _.,-]"), "_")
+            .replace(Regex("^\\.|\\.$"), "_")
+            .ifBlank { "Song" }
 }

@@ -14,6 +14,7 @@ import org.paw.app.ST_OUTPUT_OPEN
 import org.paw.app.ST_PLAYHEAD
 import org.paw.app.ST_PREVIEW_POS
 import org.paw.app.ST_REC_FRAMES
+import org.paw.app.ST_REC_RESULT_READY
 import org.paw.app.ST_REC_START_FRAME
 import org.paw.app.ST_RECORDING
 import org.paw.app.ST_SAMPLE_RATE
@@ -45,6 +46,13 @@ class ShadowEngine {
         /** take file name (not path) → frames; what wavInfo/computePeaks serve. */
         var takeFrames: MutableMap<String, Long> = mutableMapOf()
 
+        /** A finished recording parked for the next poll: the longs and paths
+         *  recordResultLongs/recordResultPaths hand out once. */
+        var recordResult: Pair<LongArray, Array<String>>? = null
+
+        /** The last setMetronome call's (bpm, beatsPerBar). */
+        var metronome: Pair<Float, Int>? = null
+
         fun reset() {
             transport = 0
             playheadFrame = 0L
@@ -56,6 +64,8 @@ class ShadowEngine {
             inChannels = 2
             meters = emptyMap()
             takeFrames = mutableMapOf()
+            recordResult = null
+            metronome = null
         }
     }
 
@@ -72,6 +82,9 @@ class ShadowEngine {
     @Implementation
     fun closeStreams() {
     }
+
+    @Implementation
+    fun routeLatencyFrames(): Int = -1
 
     @Implementation
     fun setInputGain(gain: Float) {
@@ -133,6 +146,7 @@ class ShadowEngine {
 
     @Implementation
     fun setMetronome(gen: Long, enabled: Boolean, bpm: Float, beatsPerBar: Int) {
+        metronome = bpm to beatsPerBar
     }
 
     @Implementation
@@ -182,10 +196,14 @@ class ShadowEngine {
     fun finishRecordSync(keepRolling: Boolean): Boolean = false
 
     @Implementation
-    fun recordResultLongs(): LongArray = longArrayOf(0, 0, 1, 0)
+    fun recordResultLongs(): LongArray = recordResult?.first ?: longArrayOf(0, 0, 1, 0)
 
     @Implementation
-    fun recordResultPaths(): Array<String> = emptyArray()
+    fun recordResultPaths(): Array<String> {
+        val paths = recordResult?.second ?: emptyArray()
+        recordResult = null
+        return paths
+    }
 
     // ---- state / meters ----
 
@@ -203,6 +221,7 @@ class ShadowEngine {
         dst[ST_IN_DEVICE_ID] = 42L
         dst[ST_SAMPLE_RATE] = 48000L
         dst[ST_PREVIEW_POS] = -1L
+        dst[ST_REC_RESULT_READY] = if (recordResult != null) 1L else 0L
     }
 
     @Implementation

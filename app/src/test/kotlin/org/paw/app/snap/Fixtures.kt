@@ -110,7 +110,7 @@ fun demoSong(audioDir: File): Song {
     // 7/8 felt 2+2+3, in eighths with 16th steps: kick on each group, snare
     // on the long group's middle, hats on every eighth.
     val groove = Pattern(
-        id = 1, name = "Groove", beats = 7, unit = 8, grouping = listOf(2, 2, 3),
+        id = 1, name = "Groove", track = 5, beats = 7, unit = 8, grouping = listOf(2, 2, 3),
         bars = 1, stepsPerBeat = 2,
         hits = listOf(0, 4, 8).map { Hit(1, it * 240) } +
             listOf(2, 6, 10, 12).map { Hit(2, it * 240) } +

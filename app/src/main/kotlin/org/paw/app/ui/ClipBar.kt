@@ -128,7 +128,7 @@ internal fun ClipBar(
         } else {
             // Turns the clip's slice into a sample on a beat track.
             AppButton("Sample", accent = Colors.accent, fontSize = 12.sp, modifier = Modifier.weight(1.2f),
-                onClick = { controller.sampleFromClip(trackId, clipId) })
+                onClick = { controller.sampleFromClip(trackId, clipId, controller.firstBeatTrack(), "") })
         }
         SplitButton(controller, trackId, clip, Modifier.weight(1.1f))
         AppButton(if (compact) "Dup" else "Duplicate", onClick = { controller.duplicateClip(trackId, clipId) },
