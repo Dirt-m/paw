@@ -81,11 +81,6 @@ import org.paw.app.model.Track
 // hides the playhead. The mode bar sits above the transport in thumb reach;
 // while a clip is selected the clip's actions take its place.
 
-internal val HEADER_W = 168.dp
-internal val HEADER_W_COMPACT = 148.dp
-internal val LANE_H_MAX = 128.dp
-internal val OVERVIEW_H = 24.dp
-internal val RULER_H = 28.dp
 
 /** Fit never zooms in closer than this, so a short song still has room. */
 internal const val FIT_MIN_SECONDS = 20L
