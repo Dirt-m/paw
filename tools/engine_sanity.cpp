@@ -9,7 +9,9 @@
 //
 // Exits nonzero on any failure. Temp files land in /tmp.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -127,13 +129,13 @@ static void testTimelineRender() {
     check(std::memcmp(whole.data(), parts.data(), sizeof(float) * 1024 * 2) == 0,
           "split clips render identically to the original");
 
-    // Overlapping duplicates sum.
+    // Overlapping duplicates do not sum: the top one plays alone.
     std::vector<ClipRef> dup = {{"/tmp/ov_take.wav", 1000, 500, 5000},
                                 {"/tmp/ov_take.wav", 1000, 500, 5000}};
     renderer.render(dup, 5000, 256, buf.data());
     ok = true;
-    for (int i = 0; i < 256 && ok; ++i) ok = std::fabs(buf[2 * i] - 2 * rampValue(1000 + i)) < 1e-6f;
-    check(ok, "overlapping clips sum");
+    for (int i = 0; i < 256 && ok; ++i) ok = buf[2 * i] == rampValue(1000 + i);
+    check(ok, "identical overlapping clips play once");
 
     // Missing take renders silence, engine keeps going.
     std::vector<ClipRef> missing = {{"/tmp/ov_nope.wav", 0, 500, 0}};
@@ -173,6 +175,125 @@ static void testTimelineRender() {
     ok = std::memcmp(w1.data(), fbuf.data(), sizeof(float) * 1000 * 2) == 0 &&
          std::memcmp(w2.data(), fbuf.data() + 1000 * 2, sizeof(float) * 1000 * 2) == 0;
     check(ok, "fades are window-invariant");
+}
+
+// Writes a mono 16-bit WAV holding one constant value, so whichever take is
+// audible at a frame can be read straight off the render.
+static std::string writeDcTake(const std::string& path, int frames, int16_t value) {
+    WavWriter w;
+    w.open(path, 48000, WavWriter::Format::I16, 1);
+    std::vector<int16_t> data(frames, value);
+    w.writeSamples(reinterpret_cast<const uint8_t*>(data.data()), data.size() * 2);
+    w.finalize();
+    return path;
+}
+
+// Left channel of a render of [0, frames), in one window.
+static std::vector<float> renderLeft(TimelineRenderer& r, const std::vector<ClipRef>& clips,
+                                     int frames) {
+    std::vector<float> st(static_cast<size_t>(frames) * 2), left(frames);
+    r.render(clips, 0, frames, st.data());
+    for (int i = 0; i < frames; ++i) left[i] = st[2 * i];
+    return left;
+}
+
+static bool flat(const std::vector<float>& v, int from, int to, float value) {
+    for (int i = from; i < to; ++i)
+        if (std::fabs(v[i] - value) > 1e-6f) return false;
+    return true;
+}
+
+// Largest sample-to-sample change in v over [from, to), whole vector by default.
+static float maxStep(const std::vector<float>& v, size_t from = 0, size_t to = SIZE_MAX) {
+    float m = 0.0f;
+    for (size_t i = std::max<size_t>(from, 1); i < std::min(to, v.size()); ++i)
+        m = std::max(m, std::fabs(v[i] - v[i - 1]));
+    return m;
+}
+
+// Overlapping clips stack: the clip later in the list is the only one heard
+// where they overlap, the older one plays wherever it is uncovered, and every
+// change of audible take crossfades so the output never jumps.
+static void testTakeStacking() {
+    const float hi = 16384 / 32768.0f, lo = -16384 / 32768.0f, mid = 8192 / 32768.0f;
+    const std::string a = writeDcTake("/tmp/ov_dc_hi.wav", 8000, 16384);
+    const std::string b = writeDcTake("/tmp/ov_dc_lo.wav", 8000, -16384);
+    const std::string c = writeDcTake("/tmp/ov_dc_mid.wav", 8000, 8192);
+    const int x = static_cast<int>(TimelineRenderer::kTakeCrossfadeFrames);
+    // A full-scale swing (hi to lo) over the crossfade moves 1 / x per frame.
+    const float stepLimit = 1.0f / x + 1e-4f;
+    TimelineRenderer r;
+
+    // Top clip fully inside an older one.
+    std::vector<float> v = renderLeft(r, {{a, 0, 4000, 0}, {b, 0, 1000, 1000}}, 4000);
+    check(flat(v, 0, 1000, hi) && flat(v, 2000, 4000, hi), "older clip audible outside the overlap");
+    check(flat(v, 1000 + x, 2000 - x, lo), "only the top clip audible inside the overlap");
+    check(v[1000] == hi && std::fabs(v[1000 + x / 2] - 0.0f) < 1e-3f,
+          "crossfade into the top clip starts at its first frame and is linear");
+    check(maxStep(v) <= stepLimit, "no jump at either boundary of an inner take");
+
+    // Order is the stack, not timing: listing the inner clip first buries it.
+    v = renderLeft(r, {{b, 0, 1000, 1000}, {a, 0, 4000, 0}}, 4000);
+    check(flat(v, 0, 4000, hi), "a clip earlier in the list is hidden by one later");
+
+    // Top clip extending beyond the older one: crossfade in, then the top clip
+    // alone to its own end, which has nothing under it and keeps its hard edge.
+    v = renderLeft(r, {{a, 0, 2000, 0}, {b, 0, 3000, 1000}}, 4500);
+    check(flat(v, 0, 1000, hi) && flat(v, 1000 + x, 4000, lo) && flat(v, 4000, 4500, 0.0f),
+          "top clip extending past the older one");
+    check(maxStep(v, 0, 3990) <= stepLimit, "crossfade into an extending top clip is bounded");
+
+    // Three deep: a, then b over it, then c over both.
+    v = renderLeft(r, {{a, 0, 6000, 0}, {b, 0, 4000, 1000}, {c, 0, 1000, 2000}}, 6000);
+    check(flat(v, 0, 1000, hi) && flat(v, 1000 + x, 2000, lo) && flat(v, 2000 + x, 3000 - x, mid) &&
+                  flat(v, 3000, 5000 - x, lo) && flat(v, 5000, 6000, hi),
+          "three-deep stack plays the top of each region");
+    check(maxStep(v) <= stepLimit, "three-deep stack has no jump at any boundary");
+
+    // Abutting clips are not an overlap: no crossfade, the edit stays exact.
+    v = renderLeft(r, {{a, 0, 1000, 0}, {b, 0, 1000, 1000}}, 2000);
+    check(flat(v, 0, 1000, hi) && flat(v, 1000, 2000, lo), "abutting clips get no crossfade");
+
+    // A top clip's fade-in crossfades from the take under it instead of
+    // dipping to silence: halfway through, the two weigh the same.
+    std::vector<ClipRef> faded = {{a, 0, 4000, 0}, {b, 0, 2000, 1000, 1000, 0}};
+    v = renderLeft(r, faded, 4000);
+    check(std::fabs(v[1500]) < 1e-3f && std::fabs(v[1250] - (0.75f * hi + 0.25f * lo)) < 1e-3f,
+          "a fade-in over an older clip crossfades from it");
+    check(flat(v, 3000, 4000, hi) && maxStep(v, 2000) <= stepLimit,
+          "the unfaded end of the same clip still crossfades back");
+
+    // A top take that cannot be opened is transparent, not a hole.
+    v = renderLeft(r, {{a, 0, 2000, 0}, {"/tmp/ov_dc_gone.wav", 0, 1000, 500}}, 2000);
+    check(flat(v, 0, 2000, hi), "a missing top take leaves the older one audible");
+
+    // Window invariance of the whole stack, which live playback (4096-frame
+    // chunks cut at loop wraps) and the mixdown both rely on.
+    const std::vector<ClipRef> stack = {{a, 0, 6000, 0}, {b, 0, 4000, 1000, 300, 0},
+                                        {c, 0, 1000, 2000, 0, 500}, {b, 0, 50, 5900}};
+    std::vector<float> whole(7000 * 2), pieces(7000 * 2);
+    r.render(stack, 0, 7000, whole.data());
+    for (int pos = 0; pos < 7000; pos += 333)
+        r.render(stack, pos, std::min(333, 7000 - pos), pieces.data() + pos * 2);
+    check(std::memcmp(whole.data(), pieces.data(), sizeof(float) * 7000 * 2) == 0,
+          "stacked render is window-invariant");
+
+    // The offline mixdown goes through the same renderer: at unity gain and
+    // centre pan its 16-bit output is the live render, quantized.
+    MixdownTrack t;
+    t.clips = stack;
+    MixdownTrack master;
+    const std::string out = "/tmp/ov_mix_stack.wav";
+    std::string err = renderMixdown({t}, master, SampleBank{}, HitList{}, 48000, out);
+    WavReader wr;
+    bool same = err.empty() && wr.open(out, err);
+    std::vector<float> back(7000 * 2);
+    same = same && wr.readFrames(0, 6000, back.data(), 2) == 6000;
+    for (int i = 0; i < 6000 * 2 && same; ++i) {
+        const float q = std::lround(std::clamp(whole[i], -1.0f, 1.0f) * 32767.0f) / 32768.0f;
+        same = back[i] == q;
+    }
+    check(same, "mixdown equals the live render of a stack");
 }
 
 static void testPeaks() {
@@ -473,6 +594,7 @@ int main() {
     testWavRoundTrip();
     testCrashRecovery();
     testTimelineRender();
+    testTakeStacking();
     testRendererLifecycle();
     testPeaks();
     testEffectHost();

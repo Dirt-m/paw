@@ -46,6 +46,20 @@ position and stops popping, the disk thread flushes and re-renders, then publish
 "primed". UI and engine talk through lock-free queues and atomics. The header comment
 in `AudioEngine.h` has the full thread contracts.
 
+Overlapping clips on an audio track do not sum. A track's clip list is a stack in
+list order, and new takes are appended, so after a punch-in only the new take is heard
+where it covers the old one, and the old clip plays on wherever it is uncovered. Both
+clips stay in the song. Where the audible take changes inside an older clip, the top
+clip's edge ramps over at least 240 frames (5 ms at 48 kHz) so the switch is a linear
+crossfade rather than a click; a longer fade on that edge is the crossfade itself and
+reveals the take underneath instead of dipping to silence. An edge with nothing under
+it keeps exactly its own fade, and clips that only abut are untouched, so a split
+still renders bit for bit. The order is carried unchanged from the song model through
+`Engine.syncClips` and the JNI bridge, and the timeline draws in the same order, last
+on top. `TimelineRenderer` does the compositing on the disk thread, and the offline
+mixdown uses the same renderer, so a bounce matches playback. Pattern clips on beat
+tracks play through the sampler and are not part of this.
+
 Recording is capture-first: input lands in take files regardless of playback state, a
 yanked cable finalizes the takes rather than losing them, and the controller collects
 them into clips afterwards.
@@ -196,7 +210,7 @@ replaces the JNI engine with deterministic fakes; keep its effect catalog in ste
 `BuiltinEffects.cpp`.
 
 Host-side C++ checks live in `tools/`: `engine_sanity.cpp` (WAV round trips, timeline
-placement, mixdown), `effects_sanity.cpp` (DSP behaviour per effect) and
+placement, take stacking, mixdown), `effects_sanity.cpp` (DSP behaviour per effect) and
 `sampler_sanity.cpp` (slice loading, the voice pool). The build line for each is in
 its header. Run them after touching the pure C++ layers.
 
