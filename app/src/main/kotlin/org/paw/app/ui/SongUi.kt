@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import org.paw.app.model.SnapGrid
 
 // What the song screen is showing: one mode, and at most one panel over it.
 // Everything a musician does inside a song happens here, so the transport,
@@ -47,6 +48,9 @@ class SongUi(initialMode: SongMode = SongMode.Tracks) {
 
     /** The pattern Beats mode edits; null picks the track's first. */
     var beatsPattern: Int? by mutableStateOf(null)
+
+    /** What clip edits, loop edges and placement snap to. */
+    var snap: SnapGrid by mutableStateOf(SnapGrid.Beat)
 
     /** The clock and ruler read bars.beats, or minutes and seconds. */
     var clockAsTime: Boolean by mutableStateOf(false)
