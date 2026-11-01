@@ -147,7 +147,36 @@ static void testNewBankSilencesOld() {
     CHECK(pool.sounding() == 0);
 }
 
+static void testDelayedStartsAndHitLists() {
+    SampleBank bank;
+    bank.samples.push_back(constant(1, 1.0f, 10));
+    VoicePool pool;
+    pool.adopt(&bank);
+
+    // A hit 70 frames into a 64 frame render sounds 6 frames into the next.
+    HitList list;
+    list.hits = {{70, 0, 1.0f}, {200, 0, 1.0f}};
+    pool.startHits(list, 0, 128, 0);  // only the first is in range
+    CHECK(pool.sounding() == 1);
+    std::vector<float> buf(2 * 64, 0.0f);
+    pool.render(64, [&](int) { return buf.data(); });
+    CHECK(near(buf[2 * 63], 0.0f));
+    std::fill(buf.begin(), buf.end(), 0.0f);
+    pool.render(64, [&](int) { return buf.data(); });
+    CHECK(near(buf[2 * 5], 0.0f));
+    CHECK(near(buf[2 * 6], 1.0f) && near(buf[2 * 15], 1.0f));
+    CHECK(near(buf[2 * 16], 0.0f));
+
+    // burstOffset shifts every start: a window starting at frame 190 placed
+    // 20 frames into the burst puts the hit at 200 on burst frame 30.
+    std::fill(buf.begin(), buf.end(), 0.0f);
+    pool.startHits(list, 190, 20, 20);
+    pool.render(64, [&](int) { return buf.data(); });
+    CHECK(near(buf[2 * 29], 0.0f) && near(buf[2 * 30], 1.0f));
+}
+
 int main() {
+    testDelayedStartsAndHitLists();
     testSliceLoad();
     testPlayAndRoute();
     testRetriggerOverlaps();

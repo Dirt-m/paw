@@ -99,6 +99,45 @@ std::vector<ClipRef> toClips(JNIEnv* env, jobjectArray paths, jlongArray srcStar
 // control-side single-threaded by the Kotlin caller.
 std::vector<MixdownTrack> gMixTracks;
 MixdownTrack gMixMaster;
+SampleBank gMixBank;
+HitList gMixHits;
+
+std::unique_ptr<SampleBank> loadBank(JNIEnv* env, jintArray trackIds, jobjectArray paths,
+                                     jlongArray srcStarts, jlongArray lengths, jint* loaded) {
+    const std::vector<std::string> p = toStringVector(env, paths);
+    const std::vector<int64_t> ss = toLongVector(env, srcStarts);
+    const std::vector<int64_t> ln = toLongVector(env, lengths);
+    std::vector<jint> ids(trackIds ? env->GetArrayLength(trackIds) : 0);
+    if (!ids.empty()) env->GetIntArrayRegion(trackIds, 0, ids.size(), ids.data());
+    const size_t n = std::min(std::min(p.size(), ids.size()), std::min(ss.size(), ln.size()));
+
+    auto bank = std::make_unique<SampleBank>();
+    bank->samples.resize(n);
+    *loaded = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bank->samples[i].trackId = ids[i];
+        std::string err;
+        if (loadSampleSlice(p[i], ss[i], ln[i], bank->samples[i], err)) ++*loaded;
+    }
+    return bank;
+}
+
+// Hits sorted by frame, as the voice pool's search needs.
+std::unique_ptr<HitList> toHits(JNIEnv* env, jlongArray frames, jintArray samples,
+                                jfloatArray velocities, jlong loopFrames) {
+    const std::vector<int64_t> f = toLongVector(env, frames);
+    const std::vector<float> v = toFloatVector(env, velocities);
+    std::vector<jint> s(samples ? env->GetArrayLength(samples) : 0);
+    if (!s.empty()) env->GetIntArrayRegion(samples, 0, s.size(), s.data());
+    auto list = std::make_unique<HitList>();
+    const size_t n = std::min(std::min(f.size(), s.size()), v.size());
+    list->hits.reserve(n);
+    for (size_t i = 0; i < n; ++i) list->hits.push_back({f[i], s[i], v[i]});
+    std::stable_sort(list->hits.begin(), list->hits.end(),
+                     [](const SampleHit& a, const SampleHit& b) { return a.frame < b.frame; });
+    list->loopFrames = loopFrames;
+    return list;
+}
 
 }  // namespace
 
@@ -159,23 +198,25 @@ JNIEXPORT void JNICALL Java_org_paw_app_Engine_setLoop(
 JNIEXPORT jint JNICALL Java_org_paw_app_Engine_setSamples(
         JNIEnv* env, jobject, jlong gen, jintArray trackIds, jobjectArray paths,
         jlongArray srcStarts, jlongArray lengths) {
-    const std::vector<std::string> p = toStringVector(env, paths);
-    const std::vector<int64_t> ss = toLongVector(env, srcStarts);
-    const std::vector<int64_t> ln = toLongVector(env, lengths);
-    std::vector<jint> ids(trackIds ? env->GetArrayLength(trackIds) : 0);
-    if (!ids.empty()) env->GetIntArrayRegion(trackIds, 0, ids.size(), ids.data());
-    const size_t n = std::min(std::min(p.size(), ids.size()), std::min(ss.size(), ln.size()));
-
-    auto bank = std::make_unique<SampleBank>();
-    bank->samples.resize(n);
     jint loaded = 0;
-    for (size_t i = 0; i < n; ++i) {
-        bank->samples[i].trackId = ids[i];
-        std::string err;
-        if (loadSampleSlice(p[i], ss[i], ln[i], bank->samples[i], err)) ++loaded;
-    }
-    AudioEngine::instance().setSamples(gen, std::move(bank));
+    AudioEngine::instance().setSamples(
+            gen, loadBank(env, trackIds, paths, srcStarts, lengths, &loaded));
     return loaded;
+}
+
+JNIEXPORT void JNICALL Java_org_paw_app_Engine_setHits(JNIEnv* env, jobject, jlong gen,
+                                                           jlongArray frames, jintArray samples,
+                                                           jfloatArray velocities) {
+    AudioEngine::instance().setHits(gen, toHits(env, frames, samples, velocities, 0));
+}
+
+// loopFrames 0 stops the preview.
+JNIEXPORT void JNICALL Java_org_paw_app_Engine_setPreview(JNIEnv* env, jobject, jlong gen,
+                                                              jlongArray frames, jintArray samples,
+                                                              jfloatArray velocities,
+                                                              jlong loopFrames) {
+    AudioEngine::instance().setPreview(
+            gen, loopFrames > 0 ? toHits(env, frames, samples, velocities, loopFrames) : nullptr);
 }
 
 JNIEXPORT void JNICALL Java_org_paw_app_Engine_triggerSample(JNIEnv*, jobject, jint index,
@@ -344,15 +385,26 @@ JNIEXPORT void JNICALL Java_org_paw_app_Engine_setEffectUnitState(
 JNIEXPORT void JNICALL Java_org_paw_app_Engine_mixdownBegin(JNIEnv*, jobject) {
     gMixTracks.clear();
     gMixMaster = MixdownTrack{};
+    gMixBank = SampleBank{};
+    gMixHits = HitList{};
+}
+
+JNIEXPORT void JNICALL Java_org_paw_app_Engine_mixdownSetSampler(
+        JNIEnv* env, jobject, jintArray trackIds, jobjectArray paths, jlongArray srcStarts,
+        jlongArray lengths, jlongArray hitFrames, jintArray hitSamples, jfloatArray hitVelocities) {
+    jint loaded = 0;
+    gMixBank = std::move(*loadBank(env, trackIds, paths, srcStarts, lengths, &loaded));
+    gMixHits = std::move(*toHits(env, hitFrames, hitSamples, hitVelocities, 0));
 }
 
 JNIEXPORT void JNICALL Java_org_paw_app_Engine_mixdownAddTrack(
-        JNIEnv* env, jobject, jboolean isMaster, jfloat gain, jfloat pan, jboolean mute,
+        JNIEnv* env, jobject, jint trackId, jboolean isMaster, jfloat gain, jfloat pan, jboolean mute,
         jboolean solo, jobjectArray paths, jlongArray srcStarts, jlongArray lengths,
         jlongArray timelineStarts, jlongArray fadeIns, jlongArray fadeOuts,
         jobjectArray effectIds, jobjectArray controlValues,
         jbooleanArray effectBypasses, jfloatArray effectMixes) {
     MixdownTrack t;
+    t.id = trackId;
     t.gain = gain;
     t.pan = pan;
     t.mute = mute;
@@ -369,8 +421,11 @@ JNIEXPORT void JNICALL Java_org_paw_app_Engine_mixdownAddTrack(
 JNIEXPORT jstring JNICALL Java_org_paw_app_Engine_mixdownRun(
         JNIEnv* env, jobject, jint sampleRate, jstring outPath) {
     const std::string err =
-            renderMixdown(gMixTracks, gMixMaster, sampleRate, toStdString(env, outPath));
+            renderMixdown(gMixTracks, gMixMaster, gMixBank, gMixHits, sampleRate,
+                          toStdString(env, outPath));
     gMixTracks.clear();
+    gMixBank = SampleBank{};
+    gMixHits = HitList{};
     return env->NewStringUTF(err.c_str());
 }
 

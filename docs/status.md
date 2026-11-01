@@ -13,12 +13,12 @@ master bus, device-aware input and output routing, latency-compensated take plac
 per output route, punch-in, count-in, metronome, gapless loop playback, eight LADSPA
 built-ins plus a plugin folder, mixdown to the share sheet, and a recordings browser.
 
-The sampler's playing path is built: samples are read into memory and played by a
-voice pool in the audio callback, through their track's effects, from a Sampler screen
-where every clip on the timeline is a tile. Not built yet: samples as their own
-tracks, hits and their lanes, recording taps, the meter map with groupings and
-changes, and the four percussion effects. Until then a song has one time signature,
-stored as a beat count.
+The sampler is built: beat tracks with a kit of samples cut from clips, a step
+sequencer with per-pattern time signatures and groupings, pattern clips on the
+timeline, and playing samples by hand. Not built yet: recording touches into a
+pattern, velocity editing, pitch per sample, the song's meter map with changes (the
+song still has one time signature, stored as a beat count) and the four percussion
+effects.
 
 ## Verified on the phone
 
@@ -38,9 +38,11 @@ Built, and passing whatever host-side check exists, but nobody has listened to t
 pressed them on the device. In rough order of risk:
 
 1. The sampler: how long a touch takes to sound (tap a tile against the click, and
-   listen), two fingers on two tiles at once, fast rolls on one tile, playing over
-   song playback, and a sample through a track with effects. The debug build's
-   allocation tripwire must stay quiet while tiles are hammered.
+   listen), two fingers on two tiles at once, fast rolls on one tile, and a sample
+   through a track with effects. Pattern clips in time with audio clips and the
+   click, across the loop seam and after a tempo change; the preview loop while
+   editing; beats in a mixdown. The debug build's allocation tripwire must stay
+   quiet while tiles are hammered.
 2. Ruler gestures: tap to seek, drag to pan, hold and drag to paint a loop, dragging a
    loop tab to resize it.
 3. Mix faders under playback. Bluetooth playback while recording through the Duo (two

@@ -27,11 +27,15 @@ void applyGainPan(float* stereo, int frames, float gain, float pan) {
 }  // namespace
 
 std::string renderMixdown(const std::vector<MixdownTrack>& tracks, const MixdownTrack& master,
-                          int sampleRate, const std::string& outPath) {
+                          const SampleBank& bank, const HitList& hits, int sampleRate,
+                          const std::string& outPath) {
     int64_t endFrame = 0;
     for (const MixdownTrack& t : tracks)
         for (const ClipRef& c : t.clips)
             endFrame = std::max(endFrame, c.timelineStart + c.length);
+    for (const SampleHit& h : hits.hits)
+        if (h.sample >= 0 && h.sample < static_cast<int>(bank.samples.size()))
+            endFrame = std::max(endFrame, h.frame + bank.samples[h.sample].frames);
     if (endFrame == 0) return "nothing to render";
     endFrame += sampleRate;  // effect tail
 
@@ -47,12 +51,14 @@ std::string renderMixdown(const std::vector<MixdownTrack>& tracks, const Mixdown
         const MixdownTrack* model;
         TimelineRenderer renderer;
         std::unique_ptr<EffectChain> chain;
+        std::vector<float> buf;
     };
     std::vector<TrackState> states;
     states.reserve(tracks.size());
     for (const MixdownTrack& t : tracks) {
         TrackState st;
         st.model = &t;
+        st.buf.assign(kChunk * 2, 0.0f);
         if (!t.effectIds.empty())
             st.chain.reset(EffectHost::instance().buildChain(t.effectIds, t.effectValues,
                                                              t.effectBypasses, t.effectMixes,
@@ -66,20 +72,31 @@ std::string renderMixdown(const std::vector<MixdownTrack>& tracks, const Mixdown
                                                             master.effectMixes,
                                                             sampleRate, kChunk));
 
-    std::vector<float> trackBuf(kChunk * 2), mixBuf(kChunk * 2);
+    std::vector<float> mixBuf(kChunk * 2);
+    VoicePool voices;
+    voices.adopt(&bank);
     std::vector<int16_t> pcm(kChunk * 2);
 
     for (int64_t pos = 0; pos < endFrame; pos += kChunk) {
         const int frames = static_cast<int>(std::min<int64_t>(kChunk, endFrame - pos));
         std::memset(mixBuf.data(), 0, sizeof(float) * 2 * frames);
 
+        // Clips first, then the voices on top, then chains and faders: the
+        // order the callback mixes in.
+        for (TrackState& st : states) st.renderer.render(st.model->clips, pos, frames, st.buf.data());
+        voices.startHits(hits, pos, frames, 0);
+        voices.render(frames, [&states](int trackId) -> float* {
+            for (TrackState& st : states)
+                if (st.model->id == trackId) return st.buf.data();
+            return nullptr;
+        });
+
         for (TrackState& st : states) {
             const MixdownTrack& t = *st.model;
             if (t.mute || (anySolo && !t.solo)) continue;
-            st.renderer.render(t.clips, pos, frames, trackBuf.data());
-            if (st.chain) st.chain->process(trackBuf.data(), frames);
-            applyGainPan(trackBuf.data(), frames, t.gain, t.pan);
-            for (int i = 0; i < frames * 2; ++i) mixBuf[i] += trackBuf[i];
+            if (st.chain) st.chain->process(st.buf.data(), frames);
+            applyGainPan(st.buf.data(), frames, t.gain, t.pan);
+            for (int i = 0; i < frames * 2; ++i) mixBuf[i] += st.buf[i];
         }
 
         if (masterChain) masterChain->process(mixBuf.data(), frames);

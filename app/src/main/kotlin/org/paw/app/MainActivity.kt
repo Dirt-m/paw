@@ -44,7 +44,7 @@ private sealed interface Nav {
     data class TrackDetail(val trackId: Int) : Nav
     data object Takes : Nav
     data object Metronome : Nav
-    data object Sampler : Nav
+    data class Sampler(val trackId: Int, val patternId: Int?) : Nav
 
     /** Settings, opened from the song list or from inside a song. */
     data class Options(val fromSong: Boolean) : Nav
@@ -280,7 +280,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenTakes = { nav = Nav.Takes },
                                 onOpenOptions = { nav = Nav.Options(fromSong = true) },
                                 onOpenMetronome = { nav = Nav.Metronome },
-                                onOpenSampler = { nav = Nav.Sampler },
+                                onOpenSampler = { trackId, patternId -> nav = Nav.Sampler(trackId, patternId) },
                             )
                         }
                     }
@@ -315,13 +315,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    Nav.Sampler -> {
+                    is Nav.Sampler -> {
                         val c = controller
                         if (c == null) {
                             nav = Nav.Projects
                         } else {
                             BackHandler { nav = Nav.Song }
-                            SamplerScreen(c, onBack = { nav = Nav.Song })
+                            SamplerScreen(c, here.trackId, here.patternId, onBack = { nav = Nav.Song })
                         }
                     }
 

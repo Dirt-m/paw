@@ -6,15 +6,19 @@ import org.paw.app.DeviceOption
 import org.paw.app.SongController
 import org.paw.app.model.Clip
 import org.paw.app.model.Effect
+import org.paw.app.model.Hit
 import org.paw.app.model.INPUT_CH1
 import org.paw.app.model.INPUT_CH2
 import org.paw.app.model.INPUT_STEREO
 import org.paw.app.model.InputDevice
 import org.paw.app.model.InputOption
 import org.paw.app.model.MASTER_TRACK_ID
+import org.paw.app.model.Pattern
 import org.paw.app.model.ProjectStore
 import org.paw.app.model.SAMPLE_RATE
+import org.paw.app.model.Sample
 import org.paw.app.model.Song
+import org.paw.app.model.TRACK_BEAT
 import org.paw.app.model.Track
 
 // A representative mid-session song, so every screen has something real to
@@ -88,6 +92,29 @@ fun demoSong(audioDir: File): Song {
             id = 4, name = "Bass",
             inputDevice = InputDevice.Mic, inputMode = INPUT_CH1,
         ),
+        Track(
+            id = 5, name = "Beats 1", kind = TRACK_BEAT,
+            inputDevice = InputDevice.None, inputMode = 0,
+            samples = listOf(
+                Sample(1, "Kick", drums, sec(0.0), sec(0.4)),
+                Sample(2, "Snare", drums, sec(1.0), sec(0.3)),
+                Sample(3, "Hat", drums, sec(2.0), sec(0.1), gain = 0.7f),
+            ),
+            clips = listOf(
+                // Four bars of the 7/8 groove from the top: 112 bpm, 3.5
+                // quarters a bar.
+                Clip(id = 5, take = "", srcStart = 0, length = sec(7.5), start = sec(2.0), pattern = 1),
+            ),
+        ),
+    )
+    // 7/8 felt 2+2+3, in eighths with 16th steps: kick on each group, snare
+    // on the long group's middle, hats on every eighth.
+    val groove = Pattern(
+        id = 1, name = "Groove", beats = 7, unit = 8, grouping = listOf(2, 2, 3),
+        bars = 1, stepsPerBeat = 2,
+        hits = listOf(0, 4, 8).map { Hit(1, it * 240) } +
+            listOf(2, 6, 10, 12).map { Hit(2, it * 240) } +
+            (0 until 7).map { Hit(3, it * 480) },
     )
 
     return Song(
@@ -98,8 +125,11 @@ fun demoSong(audioDir: File): Song {
             gain = 0.95f,
             effects = listOf(Effect("builtin:paw_limiter", listOf(-1f, -0.3f, 50f))),
         ),
-        nextTrackId = 5,
+        nextTrackId = 6,
         nextClipId = 6,
+        patterns = listOf(groove),
+        nextPatternId = 2,
+        nextSampleId = 4,
         tempoBpm = 112f,
         beatsPerBar = 4,
         loopStart = sec(4.0),

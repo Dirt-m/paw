@@ -116,7 +116,9 @@ public:
     // Drops back to zero on its own if the file reappears (the renderer's
     // failure cache is dropped on every generation the disk thread adopts).
     static constexpr int kStMissingTakes = 15;
-    static constexpr int kStateSlots = 16;
+    // Where a pattern preview is, in frames into its loop; -1 when none plays.
+    static constexpr int kStPreviewPos = 16;
+    static constexpr int kStateSlots = 17;
 
     // Meter slots the callback publishes each burst, plus one for the master.
     static constexpr int kMaxMeters = 64;
@@ -185,6 +187,14 @@ public:
     // Lock-free; one producer only, which is the UI thread. A full queue
     // drops the touch rather than block.
     void triggerSample(int index, float velocity);
+    // The song's programmed hits in timeline frames, played while the
+    // transport rolls. Replaces the previous list; nullptr clears it.
+    void setHits(int64_t gen, std::unique_ptr<HitList> hits);
+    // A pattern looping on its own while the transport is stopped, so a beat
+    // can be built without playing the song. Replacing a running preview
+    // keeps its position (modulo the new length), so editing while it plays
+    // never restarts it; nullptr stops it.
+    void setPreview(int64_t gen, std::unique_ptr<HitList> preview);
 
     // Transport. Total and idempotent commands that decide under the engine's
     // own lock and report what happened, so no caller has to branch on a copy
@@ -342,13 +352,14 @@ private:
     };
 
     // One retired graph object, waiting out the callback. Exactly one of the
-    // four is set; the shared_ptr form keeps a removed TrackRT (and the chain
+    // five is set; the shared_ptr form keeps a removed TrackRT (and the chain
     // its destructor deletes) alive past the last disk-thread reference.
     struct Retired {
         TrackArray* array = nullptr;
         EffectChain* chain = nullptr;
         std::shared_ptr<TrackRT> track;
         SampleBank* bank = nullptr;
+        HitList* hits = nullptr;
         uint64_t tick = 0;
     };
 
@@ -397,7 +408,10 @@ private:
     // before the swap would let a burst that already read the old pointer run
     // past the two-tick window.
     void retireLocked(TrackArray* array, EffectChain* chain, std::shared_ptr<TrackRT> track,
-                      SampleBank* bank = nullptr);
+                      SampleBank* bank = nullptr, HitList* hits = nullptr);
+    // Callback only: starts the timeline hits and the preview hits that fall
+    // in this burst.
+    void scheduleHits(int frames, bool rolling);
     void drainRetiredLocked(bool force);
     void wakeDiskLocked();
     void wakeRecordLocked();
@@ -469,6 +483,11 @@ private:
         float velocity;
     };
     std::atomic<SampleBank*> mSamplesRT{nullptr};
+    std::atomic<HitList*> mHitsRT{nullptr};
+    std::atomic<HitList*> mPreviewRT{nullptr};
+    const HitList* mCbPreview = nullptr;  // callback only: the list mPreviewPos belongs to
+    int64_t mPreviewPos = 0;              // callback only
+    std::atomic<int64_t> mPreviewPosPub{-1};
     RingBuffer mTriggers{sizeof(SampleTrigger) * 256};
     VoicePool mVoices;
 

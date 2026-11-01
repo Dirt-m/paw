@@ -3,7 +3,7 @@
 // effects, and the offline mixdown. Build and run:
 //
 //   g++ -O2 -std=c++17 -Wall -Wextra -Iapp/src/main/cpp tools/engine_sanity.cpp
-//       app/src/main/cpp/{WavFile,Timeline,Peaks,EffectHost,Mixdown}.cpp
+//       app/src/main/cpp/{WavFile,Timeline,Peaks,EffectHost,Mixdown,Sampler}.cpp
 //       app/src/main/cpp/effects/BuiltinEffects.cpp -ldl
 //       -o /tmp/engine_sanity && /tmp/engine_sanity   (one line)
 //
@@ -367,7 +367,7 @@ static void testMixdown() {
     MixdownTrack master;
 
     const std::string out = "/tmp/ov_mixdown.wav";
-    std::string err = renderMixdown({a, b}, master, 48000, out);
+    std::string err = renderMixdown({a, b}, master, SampleBank{}, HitList{}, 48000, out);
     check(err.empty(), "mixdown renders: " + err);
 
     WavReader r;
@@ -380,8 +380,40 @@ static void testMixdown() {
     // Ends one second (48000 frames) after the last clip end (7200).
     check(r.frames() == 7200 + 48000, "mixdown length = last clip end + 1 s tail");
 
-    err = renderMixdown({}, master, 48000, "/tmp/ov_empty.wav");
+    err = renderMixdown({}, master, SampleBank{}, HitList{}, 48000, "/tmp/ov_empty.wav");
     check(!err.empty(), "empty mixdown reports an error");
+}
+
+// Programmed hits render through their track, at their frame, with the
+// track's gain, and stretch the render to the end of the last hit.
+static void testMixdownHits() {
+    MixdownTrack beats;
+    beats.id = 7;
+    beats.gain = 0.5f;
+    MixdownTrack master;
+    SampleBank bank;
+    Sample s;
+    s.trackId = 7;
+    s.frames = 100;
+    s.stereo.assign(200, 0.25f);
+    bank.samples.push_back(s);
+    HitList hits;
+    hits.hits = {{1000, 0, 1.0f}, {5000, 0, 0.5f}};
+
+    const std::string out = "/tmp/ov_mixdown_hits.wav";
+    std::string err = renderMixdown({beats}, master, bank, hits, 48000, out);
+    check(err.empty(), "mixdown with hits renders: " + err);
+    WavReader r;
+    check(r.open(out, err), "mixdown with hits opens");
+    std::vector<float> buf(2);
+    r.readFrames(999, 1, buf.data(), 2);
+    check(std::fabs(buf[0]) < 1e-4f, "nothing before the first hit");
+    r.readFrames(1000, 1, buf.data(), 2);
+    const float pan = panGains(0.5f, 0.0f).l;
+    check(std::fabs(buf[0] - 0.25f * pan) < 2.0f / 32768.0f, "hit lands on its frame through the fader");
+    r.readFrames(5050, 1, buf.data(), 2);
+    check(std::fabs(buf[0] - 0.125f * pan) < 2.0f / 32768.0f, "velocity scales the second hit");
+    check(r.frames() == 5100 + 48000, "render runs to the last hit's end plus the tail");
 }
 
 // A recorder crash never reaches finalize(). The reader must recover the
@@ -447,6 +479,7 @@ int main() {
     testChainBlockInvariance();
     testPanLaw();
     testMixdown();
+    testMixdownHits();
     printf(gFailures ? "\n== %d FAILURE(S) ==\n" : "\n== ALL PASS ==\n", gFailures);
     return gFailures ? 1 : 0;
 }

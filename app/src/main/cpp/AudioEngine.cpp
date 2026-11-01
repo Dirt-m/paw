@@ -113,6 +113,8 @@ void AudioEngine::shutdown() {
     // Threads are gone and the callback with them; free the graph directly.
     delete mTracksRT.exchange(nullptr);
     delete mSamplesRT.exchange(nullptr);
+    delete mHitsRT.exchange(nullptr);
+    delete mPreviewRT.exchange(nullptr);
     {
         std::lock_guard<std::mutex> lock(mControlMutex);
         drainRetiredLocked(true);
@@ -512,6 +514,7 @@ void AudioEngine::mixTracks(int frames, bool rolling, bool inputLive) {
     SampleTrigger trig;
     while (mTriggers.read(reinterpret_cast<uint8_t*>(&trig), sizeof trig) == sizeof trig)
         mVoices.start(trig.index, trig.velocity);
+    scheduleHits(frames, rolling);
     mVoices.render(frames, [arr](int trackId) -> float* {
         for (TrackRT* tr : arr->tracks)
             if (tr->id == trackId) return tr->scratch.data();
@@ -540,6 +543,48 @@ void AudioEngine::mixTracks(int frames, bool rolling, bool inputLive) {
         }
     }
     mMeterCount.store(meterCount, std::memory_order_release);
+}
+
+void AudioEngine::scheduleHits(int frames, bool rolling) {
+    if (rolling) {
+        if (const HitList* hl = mHitsRT.load(std::memory_order_acquire)) {
+            // The same wrap advancePlayhead applies: a burst crossing the loop
+            // end plays the start of the loop for its remainder.
+            const int64_t ph = mPlayhead.load(std::memory_order_relaxed);
+            const int64_t ls = mLoopStart.load(std::memory_order_relaxed);
+            const int64_t le = mLoopEnd.load(std::memory_order_relaxed);
+            if (mLoopEnabled.load(std::memory_order_acquire) && le > ls && ph < le &&
+                ph + frames > le) {
+                const int head = static_cast<int>(le - ph);
+                mVoices.startHits(*hl, ph, head, 0);
+                mVoices.startHits(*hl, ls, frames - head, head);
+            } else {
+                mVoices.startHits(*hl, ph, frames, 0);
+            }
+        }
+    }
+
+    const HitList* pv = mPreviewRT.load(std::memory_order_acquire);
+    if (pv != mCbPreview) {
+        // A replacement keeps the running position; a fresh start begins at 0.
+        if (!mCbPreview || !pv) mPreviewPos = 0;
+        mCbPreview = pv;
+    }
+    if (!pv || pv->loopFrames <= 0 ||
+        mTransport.load(std::memory_order_relaxed) != kTransportStopped) {
+        mPreviewPosPub.store(-1, std::memory_order_relaxed);
+        return;
+    }
+    int64_t pos = mPreviewPos % pv->loopFrames;
+    int done = 0;
+    while (done < frames) {
+        const int n = static_cast<int>(std::min<int64_t>(frames - done, pv->loopFrames - pos));
+        mVoices.startHits(*pv, pos, n, done);
+        done += n;
+        pos = (pos + n) % pv->loopFrames;
+    }
+    mPreviewPos = pos;
+    mPreviewPosPub.store(pos, std::memory_order_relaxed);
 }
 
 void AudioEngine::advancePlayhead(int frames) {
@@ -774,12 +819,14 @@ void AudioEngine::diskLoop() {
 // ---------------------------------------------------------------- control --
 
 void AudioEngine::retireLocked(TrackArray* array, EffectChain* chain,
-                               std::shared_ptr<TrackRT> track, SampleBank* bank) {
+                               std::shared_ptr<TrackRT> track, SampleBank* bank,
+                               HitList* hits) {
     Retired r;
     r.array = array;
     r.chain = chain;
     r.track = std::move(track);
     r.bank = bank;
+    r.hits = hits;
     // Sampled after the caller published the replacement: any burst that can
     // still hold the old pointer started at or before this tick, so it has
     // finished by the time two further bursts have started.
@@ -806,6 +853,7 @@ void AudioEngine::drainRetiredLocked(bool force) {
         delete r.array;
         delete r.chain;
         delete r.bank;
+        delete r.hits;
         r.track.reset();  // last reference: ~TrackRT deletes its chain and ring
     }
     mRetired.resize(keep);
@@ -901,6 +949,10 @@ void AudioEngine::resetSongScopeLocked() {
     rebuildTrackArrayLocked();  // the new array is empty
     if (SampleBank* bank = mSamplesRT.exchange(nullptr, std::memory_order_acq_rel))
         retireLocked(nullptr, nullptr, nullptr, bank);
+    if (HitList* hits = mHitsRT.exchange(nullptr, std::memory_order_acq_rel))
+        retireLocked(nullptr, nullptr, nullptr, nullptr, hits);
+    if (HitList* preview = mPreviewRT.exchange(nullptr, std::memory_order_acq_rel))
+        retireLocked(nullptr, nullptr, nullptr, nullptr, preview);
     if (masterChain) retireLocked(nullptr, masterChain, nullptr);
     for (auto& tr : doomed) retireLocked(nullptr, nullptr, std::move(tr));
 
@@ -1405,6 +1457,22 @@ void AudioEngine::setSamples(int64_t gen, std::unique_ptr<SampleBank> bank) {
     if (old) retireLocked(nullptr, nullptr, nullptr, old);
 }
 
+void AudioEngine::setHits(int64_t gen, std::unique_ptr<HitList> hits) {
+    PAW_ASSERT_CONTROL();
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    if (!acceptGenLocked(gen, "setHits")) return;
+    if (HitList* old = mHitsRT.exchange(hits.release(), std::memory_order_acq_rel))
+        retireLocked(nullptr, nullptr, nullptr, nullptr, old);
+}
+
+void AudioEngine::setPreview(int64_t gen, std::unique_ptr<HitList> preview) {
+    PAW_ASSERT_CONTROL();
+    std::lock_guard<std::mutex> lock(mControlMutex);
+    if (!acceptGenLocked(gen, "setPreview")) return;
+    if (HitList* old = mPreviewRT.exchange(preview.release(), std::memory_order_acq_rel))
+        retireLocked(nullptr, nullptr, nullptr, nullptr, old);
+}
+
 void AudioEngine::triggerSample(int index, float velocity) {
     PAW_ASSERT_CONTROL();
     const SampleTrigger trig{index, velocity};
@@ -1458,6 +1526,7 @@ void AudioEngine::stateSnapshot(int64_t* out) {
     out[kStSampleRate] = mSampleRate.load(std::memory_order_relaxed);
     out[kStDroppedCalls] = mDroppedCalls.load(std::memory_order_relaxed);
     out[kStMissingTakes] = mMissingTakes.load(std::memory_order_relaxed);
+    out[kStPreviewPos] = mPreviewPosPub.load(std::memory_order_relaxed);
 }
 
 int AudioEngine::meterSnapshot(int* ids, float* peaks, int cap) {

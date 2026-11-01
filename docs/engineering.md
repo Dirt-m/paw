@@ -90,27 +90,34 @@ on, so it cannot be an interface and a card reader at once.
 
 Finger drumming has to answer within a few milliseconds of the touch, so samples play
 from memory, not from the disk thread's rings, which run up to about 0.7 s ahead.
-When a song opens, a control thread reads every sample's slice of its take into a
-float buffer. The audio callback owns a fixed pool of voices and never allocates; a
-voice is a sample buffer, a read position, a rate (for pitch) and a gain. When every
-voice is busy, the oldest one is stolen with a short fade.
+A control thread reads every beat track's samples into float buffers and publishes
+them as one bank. The audio callback owns a fixed pool of voices and never allocates;
+a voice is a bank index, a read position, a start delay and a gain. When too many
+sound at once, the oldest one fades out over 2 ms.
 
 A touch reaches the callback as a trigger on a lock-free queue (sample, velocity), and
 the next burst starts a voice at its first frame. Programmed hits go through the same
-voices: while the transport rolls, the callback starts every hit that falls inside the
-burst at its exact frame, so a played sample and a sequenced one sound the same. Each
-voice mixes into its sample track's input, ahead of the effect chain, the fader and
-the master, and offline mixdown runs the same scheduler over the same hits.
+voices. `SongController` expands every pattern clip into hits in timeline frames
+(repeating the pattern over the clip, offset by the clip's start into it) and pushes
+the sorted list whenever the song changes; the callback starts each hit that falls in
+the burst at its exact frame, wrapping with the loop the same way the playhead does.
+Each voice mixes into its beat track ahead of the effect chain, the fader and the
+master. Offline mixdown runs the same voice pool over the same list.
 
-Hits are stored in musical time (bar, beat and ticks within the beat), not frames, so
-tempo and meter edits move them with the grid. The engine receives the meter map and
-converts hit positions to frames once per edit, never in the callback. Touches
-recorded as hits are placed where the player heard them: the frame the callback saw,
-minus the output route's latency, the same correction takes get.
+A pattern being edited loops on its own through a second hit list with a loop length.
+It plays only while the transport is stopped, and replacing it keeps its place, so
+editing the grid never restarts it.
+
+Pattern hits are stored in ticks (960 to a quarter note), so a pattern keeps its shape
+at any tempo. A pattern clip's own fields are frames, like any clip, so the clip edits
+stay shared with audio clips; a tempo change rescales pattern clips and leaves audio
+clips alone.
+
+The bank and the hit list are pushed on one serial background dispatcher, so a slow
+bank load can never land after the hits computed for the next one.
 
 The weak link is the touch, not the engine. Android delivers touch events tens of
-milliseconds after contact, and nothing in the app can recover that. The voice path
-has to be tried on the phone first, before the grid and the editor are built on it.
+milliseconds after contact, and nothing in the app can recover that.
 
 In the UI a sampler sound is a sample. In code a sampler sound is a `Sample` and one
 value of audio is a frame or a value, so the two never share a word.

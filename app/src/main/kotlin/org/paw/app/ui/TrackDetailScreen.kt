@@ -42,6 +42,7 @@ import org.paw.app.model.InputDevice
 import org.paw.app.model.MASTER_TRACK_ID
 import org.paw.app.model.PluginInfo
 import org.paw.app.model.PluginPort
+import org.paw.app.model.TRACK_BEAT
 
 // One track, one screen: level, input, effects, and (last, and small) remove.
 // The master gets the same screen with output routing where input would be.
@@ -98,7 +99,11 @@ fun TrackDetailScreen(
             val levelAndIo: @Composable () -> Unit = {
                 Stack(gap = 20.dp) {
                     LevelSection(controller, trackId, track.gain, track.pan, isMaster)
-                    if (isMaster) OutputSection(controller) else InputSection(controller, trackId)
+                    when {
+                        isMaster -> OutputSection(controller)
+                        track.kind == TRACK_BEAT -> SamplesSection(controller, trackId)
+                        else -> InputSection(controller, trackId)
+                    }
                 }
             }
             val effects: @Composable () -> Unit = {
@@ -182,6 +187,46 @@ private fun LevelSection(
                     PanSlider(controller, trackId, pan, Modifier.weight(1f), onLive = { livePan = it })
                     HSpace(10.dp)
                     Text(formatPan(livePan ?: pan), style = MonoStyle, modifier = Modifier.width(64.dp))
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ samples --
+
+/** A beat track's kit: each sample's level, and a way to drop it. */
+@Composable
+private fun SamplesSection(controller: SongController, trackId: Int) {
+    val track = controller.song.track(trackId) ?: return
+    Column {
+        SectionLabel("Samples")
+        VSpace(6.dp)
+        Column(Modifier.fillMaxWidth().panel().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            if (track.samples.isEmpty()) {
+                Text(
+                    "Select a clip on the timeline and press Sample",
+                    style = DimStyle,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            }
+            for (s in track.samples) {
+                var live by remember(s.id) { mutableStateOf<Float?>(null) }
+                SettingRow(s.name, labelWidth = 96.dp) {
+                    MiniSlider(
+                        value = live ?: gainToPos(s.gain),
+                        onChange = { live = it },
+                        onCommit = {
+                            live?.let { controller.setSampleGain(trackId, s.id, posToGain(it)) }
+                            live = null
+                        },
+                        onReset = { controller.setSampleGain(trackId, s.id, 1f) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    HSpace(8.dp)
+                    Text(formatDb(live?.let(::posToGain) ?: s.gain), style = MonoStyle, modifier = Modifier.width(60.dp))
+                    AppButton("Remove", accent = Colors.red, fontSize = 12.sp,
+                        onClick = { controller.removeSample(trackId, s.id) })
                 }
             }
         }
