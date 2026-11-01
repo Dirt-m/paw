@@ -86,6 +86,35 @@ mass storage mode turns its microSD card into a drive, and recordings are import
 from there (`/XVIVE/XV_0001.wav` and on). The mode is chosen on the recorder at power
 on, so it cannot be an interface and a card reader at once.
 
+## Sampler
+
+Finger drumming has to answer within a few milliseconds of the touch, so samples play
+from memory, not from the disk thread's rings, which run up to about 0.7 s ahead.
+When a song opens, a control thread reads every sample's slice of its take into a
+float buffer. The audio callback owns a fixed pool of voices and never allocates; a
+voice is a sample buffer, a read position, a rate (for pitch) and a gain. When every
+voice is busy, the oldest one is stolen with a short fade.
+
+A touch reaches the callback as a trigger on a lock-free queue (sample, velocity), and
+the next burst starts a voice at its first frame. Programmed hits go through the same
+voices: while the transport rolls, the callback starts every hit that falls inside the
+burst at its exact frame, so a played sample and a sequenced one sound the same. Each
+voice mixes into its sample track's input, ahead of the effect chain, the fader and
+the master, and offline mixdown runs the same scheduler over the same hits.
+
+Hits are stored in musical time (bar, beat and ticks within the beat), not frames, so
+tempo and meter edits move them with the grid. The engine receives the meter map and
+converts hit positions to frames once per edit, never in the callback. Touches
+recorded as hits are placed where the player heard them: the frame the callback saw,
+minus the output route's latency, the same correction takes get.
+
+The weak link is the touch, not the engine. Android delivers touch events tens of
+milliseconds after contact, and nothing in the app can recover that. The voice path
+has to be tried on the phone first, before the grid and the editor are built on it.
+
+In the UI a sampler sound is a sample. In code a sampler sound is a `Sample` and one
+value of audio is a frame or a value, so the two never share a word.
+
 ## Effects
 
 Per-track serial chains, processed in the engine. Each slot has bypass and wet/dry

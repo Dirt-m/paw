@@ -55,10 +55,16 @@ any slider resets it to its default.
 ## Song
 
 Both orientations. Track lanes with waveforms that stay readable on quiet takes.
-Transport: play, stop, record, return to start, seek. A metronome with click, count-in, tempo and
-beats per bar stored in the song, and a loop region that plays back without a gap at the
-wrap (recording stays linear). Timeline zoom is remembered per song. The screen stays
-awake while recording and for five minutes after the last touch, adjustable.
+Transport: play, stop, record, return to start, seek. A metronome with click, count-in and
+tempo stored in the song, and a loop region that plays back without a gap at the wrap
+(recording stays linear). Timeline zoom is remembered per song. The screen stays awake
+while recording and for five minutes after the last touch, adjustable.
+
+The song has a meter map. Bar 1 sets the time signature, and any later bar can change
+it. A time signature has a beat count, a beat unit and a grouping, so 7/8 can be felt
+as 2+2+3 or 3+2+2. The grouping sets where the click accents and where the grid draws
+its strong lines. One tempo per song, counted in quarter notes, so an eighth note lasts
+the same in 4/4 and in 7/8.
 
 Tracks and songs can be renamed. Deleting a song asks whether its recordings go with
 it.
@@ -72,10 +78,29 @@ be imported into the song: WAV at any common rate and depth, and compressed form
 the platform can decode. A 48 kHz WAV is copied sample for sample; anything else is
 resampled to 48 kHz.
 
+## Samples
+
+A sample is a slice of a take: a start and an end inside the file, with its own level
+and pitch. Like a clip, it refers to the take and never copies or changes it. Takes
+recorded or imported into the song are where samples come from.
+
+Each sample lives on a sample track, which has the same controls, effect chain and
+routing to the master as any other track. Its lane shows hits instead of waveforms. A
+hit is a position on the grid and a velocity. Hits snap to the grid by default, which
+follows the meter map (the beat unit, its grouping, and an optional subdivision such as
+16ths or triplets), and they can be placed off the grid.
+
+Samples are played by hand. The sampler screen shows every sample in the song as a
+large tile, and touching one plays it at once, through its track's effects. While
+recording, those touches land as hits on the sample's lane, placed where the player
+heard them. Quantizing moves hits to the grid and can be undone. Hits are not MIDI and
+there is no MIDI input.
+
 ## Effects
 
-Per-track serial chain. Eight built-ins: 3-band EQ, compressor, delay, reverb, chorus,
-gate, limiter, filter. Each slot has bypass and wet/dry, and the chain can be
+Per-track serial chain. Twelve built-ins: 3-band EQ, compressor, delay, reverb, chorus,
+gate, limiter, filter, and four aimed at percussion: transient shaper, saturation,
+bitcrusher and wavefolder. Each slot has bypass and wet/dry, and the chain can be
 reordered. Third-party effects load from a folder on device storage. The format is
 LADSPA: a stable C ABI, a large body of GPL plugins that compile for arm64, control
 ports only, no plugin GUIs.

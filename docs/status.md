@@ -5,13 +5,17 @@ first.
 
 ## Built
 
-Everything in `docs/scope.md`: songs as folders of immutable takes, a persistent
+Everything in `docs/scope.md` except what is listed below: songs as folders of immutable takes, a persistent
 full-duplex engine with a transport, per-track arming and capture, a timeline with
 waveforms and reference-only clip editing (move, trim, split, duplicate, fades, move
 between tracks), undo and redo, per-track volume, pan, mute, solo and monitoring, a
 master bus, device-aware input and output routing, latency-compensated take placement
 per output route, punch-in, count-in, metronome, gapless loop playback, eight LADSPA
 built-ins plus a plugin folder, mixdown to the share sheet, and a recordings browser.
+
+Not built yet: the sampler (samples, sample tracks, hits, the sampler screen), the
+meter map with groupings and changes, and the four percussion effects. Until then a
+song has one time signature, stored as a beat count.
 
 ## Verified on the phone
 
