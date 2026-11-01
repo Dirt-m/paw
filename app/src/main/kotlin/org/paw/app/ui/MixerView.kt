@@ -54,9 +54,10 @@ private val MASTER_W_SHORT = 132.dp
 @Composable
 fun MixerView(
     controller: SongController,
-    onOpenTrack: (Int) -> Unit,
+    ui: SongUi,
     short: Boolean,
 ) {
+    val onOpenTrack: (Int) -> Unit = { ui.open(SongPanel.Inspector(it)) }
     val song = controller.song
     val scroll = rememberScrollState()
     val masterW = if (short) MASTER_W_SHORT else MASTER_W_TALL

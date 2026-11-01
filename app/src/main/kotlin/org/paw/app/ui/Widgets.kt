@@ -412,9 +412,11 @@ fun Stepper(
 // -------------------------------------------------------------------- slider --
 
 /**
- * The fader. [value] is normalized 0..1. onStart fires once when a gesture
- * begins (undo snapshots hang off it), onCommit once when it ends. A long
- * press fires onReset; double tap would add a detection delay to plain taps.
+ * The fader. [value] is normalized 0..1. A drag moves it by the distance the
+ * finger travels, from wherever it was, so grabbing a fader never makes it
+ * jump. onStart fires once when a drag begins (undo snapshots hang off it),
+ * onCommit once when it ends. A double tap fires onReset: a long press would
+ * catch a careful grab that pauses before it moves.
  *
  * [vertical] makes a channel-strip fader: 1.0 at the top, only vertical
  * drags claimed.
@@ -431,38 +433,37 @@ fun MiniSlider(
     vertical: Boolean = false,
     centerTick: Boolean = false,
 ) {
+    val current = androidx.compose.runtime.rememberUpdatedState(value)
+    val reset = androidx.compose.runtime.rememberUpdatedState(onReset)
     Canvas(
         modifier
             .then(if (vertical) Modifier.width(36.dp) else Modifier.height(36.dp))
-            .pointerInput(vertical) {
-                detectTapGestures(
-                    onLongPress = if (onReset != null) { _ -> onReset() } else null,
-                ) { ofs ->
-                    onStart?.invoke()
-                    onChange(fraction(ofs, vertical))
-                    onCommit?.invoke()
-                }
+            .pointerInput(vertical, onReset != null) {
+                if (onReset != null) detectTapGestures(onDoubleTap = { reset.value?.invoke() })
             }
             .pointerInput(vertical) {
                 // A cross-axis drag that starts on a slider belongs to the
                 // container under it. A cancelled drag still ends the gesture.
+                var pos = 0f
                 if (vertical) {
                     detectVerticalDragGestures(
-                        onDragStart = { onStart?.invoke() },
+                        onDragStart = { pos = current.value; onStart?.invoke() },
                         onDragEnd = { onCommit?.invoke() },
                         onDragCancel = { onCommit?.invoke() },
-                    ) { change, _ ->
+                    ) { change, dy ->
                         change.consume()
-                        onChange(fraction(change.position, true))
+                        pos = (pos - dy / size.height).coerceIn(0f, 1f)
+                        onChange(pos)
                     }
                 } else {
                     detectHorizontalDragGestures(
-                        onDragStart = { onStart?.invoke() },
+                        onDragStart = { pos = current.value; onStart?.invoke() },
                         onDragEnd = { onCommit?.invoke() },
                         onDragCancel = { onCommit?.invoke() },
-                    ) { change, _ ->
+                    ) { change, dx ->
                         change.consume()
-                        onChange(fraction(change.position, false))
+                        pos = (pos + dx / size.width).coerceIn(0f, 1f)
+                        onChange(pos)
                     }
                 }
             },
@@ -501,12 +502,27 @@ fun MiniSlider(
     }
 }
 
-private fun androidx.compose.ui.input.pointer.PointerInputScope.fraction(
-    pos: Offset,
-    vertical: Boolean,
-): Float =
-    if (vertical) (1f - pos.y / size.height).coerceIn(0f, 1f)
-    else (pos.x / size.width).coerceIn(0f, 1f)
+/**
+ * A slider's value, which a double tap resets: the visible place for the
+ * reset that the slider itself also takes.
+ */
+@Composable
+fun ValueReadout(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: androidx.compose.ui.text.TextStyle = MonoStyle,
+    onReset: (() -> Unit)? = null,
+) {
+    Text(
+        text,
+        style = style,
+        maxLines = 1,
+        modifier = modifier.then(
+            if (onReset != null) Modifier.pointerInput(Unit) { detectTapGestures(onDoubleTap = { onReset() }) }
+            else Modifier,
+        ),
+    )
+}
 
 // --------------------------------------------------------------------- meter --
 
@@ -811,6 +827,173 @@ fun PanSlider(
         },
         modifier = modifier,
     )
+}
+
+// -------------------------------------------------------------------- icons --
+
+// Glyphs are drawn, not set in a font: the symbol fonts on phones differ, and
+// a drawn stroke matches the headphones beside it. One stroke weight for all.
+
+typealias Glyph = DrawScope.(Color) -> Unit
+
+private fun DrawScope.glyphStroke() = Stroke(size.width * 0.11f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+
+val ChevronLeftGlyph: Glyph = { c ->
+    val p = androidx.compose.ui.graphics.Path().apply {
+        moveTo(size.width * 0.62f, size.height * 0.18f)
+        lineTo(size.width * 0.3f, size.height * 0.5f)
+        lineTo(size.width * 0.62f, size.height * 0.82f)
+    }
+    drawPath(p, c, style = glyphStroke())
+}
+
+val ChevronRightGlyph: Glyph = { c ->
+    val p = androidx.compose.ui.graphics.Path().apply {
+        moveTo(size.width * 0.38f, size.height * 0.18f)
+        lineTo(size.width * 0.7f, size.height * 0.5f)
+        lineTo(size.width * 0.38f, size.height * 0.82f)
+    }
+    drawPath(p, c, style = glyphStroke())
+}
+
+val CloseGlyph: Glyph = { c ->
+    val a = size.width * 0.22f
+    val b = size.width * 0.78f
+    drawLine(c, Offset(a, a), Offset(b, b), strokeWidth = size.width * 0.11f, cap = StrokeCap.Round)
+    drawLine(c, Offset(b, a), Offset(a, b), strokeWidth = size.width * 0.11f, cap = StrokeCap.Round)
+}
+
+private fun DrawScope.curvedArrow(c: Color, mirror: Boolean) {
+    val w = size.width
+    val h = size.height
+    fun x(v: Float) = if (mirror) w - v * w else v * w
+    val p = androidx.compose.ui.graphics.Path().apply {
+        moveTo(x(0.25f), h * 0.42f)
+        cubicTo(x(0.4f), h * 0.2f, x(0.85f), h * 0.25f, x(0.82f), h * 0.6f)
+        cubicTo(x(0.8f), h * 0.78f, x(0.62f), h * 0.84f, x(0.5f), h * 0.84f)
+    }
+    drawPath(p, c, style = glyphStroke())
+    val head = androidx.compose.ui.graphics.Path().apply {
+        moveTo(x(0.14f), h * 0.22f)
+        lineTo(x(0.25f), h * 0.45f)
+        lineTo(x(0.48f), h * 0.38f)
+    }
+    drawPath(head, c, style = glyphStroke())
+}
+
+val UndoGlyph: Glyph = { c -> curvedArrow(c, mirror = false) }
+val RedoGlyph: Glyph = { c -> curvedArrow(c, mirror = true) }
+
+/** An arrow leaving a tray: share the mixdown. */
+val ShareGlyph: Glyph = { c ->
+    val w = size.width
+    val h = size.height
+    drawLine(c, Offset(w * 0.5f, h * 0.12f), Offset(w * 0.5f, h * 0.6f), strokeWidth = w * 0.11f, cap = StrokeCap.Round)
+    val head = androidx.compose.ui.graphics.Path().apply {
+        moveTo(w * 0.3f, h * 0.32f)
+        lineTo(w * 0.5f, h * 0.12f)
+        lineTo(w * 0.7f, h * 0.32f)
+    }
+    drawPath(head, c, style = glyphStroke())
+    val tray = androidx.compose.ui.graphics.Path().apply {
+        moveTo(w * 0.18f, h * 0.55f)
+        lineTo(w * 0.18f, h * 0.86f)
+        lineTo(w * 0.82f, h * 0.86f)
+        lineTo(w * 0.82f, h * 0.55f)
+    }
+    drawPath(tray, c, style = glyphStroke())
+}
+
+val MoreGlyph: Glyph = { c ->
+    for (i in 0..2) drawCircle(c, radius = size.width * 0.08f, center = Offset(size.width / 2f, size.height * (0.22f + 0.28f * i)))
+}
+
+/** The record-arm dot. */
+val ArmGlyph: Glyph = { c -> drawCircle(c, radius = size.width * 0.28f) }
+
+/** A 2 by 2 block of pads: the kit. */
+val PadsGlyph: Glyph = { c ->
+    val g = size.width * 0.12f
+    val cell = (size.width - 3 * g) / 2f
+    for (r in 0..1) for (col in 0..1) {
+        drawRoundRect(
+            c,
+            topLeft = Offset(g + col * (cell + g), g + r * (cell + g)),
+            size = Size(cell, cell),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(cell * 0.25f),
+        )
+    }
+}
+
+val PlayGlyph: Glyph = { c ->
+    val p = androidx.compose.ui.graphics.Path().apply {
+        moveTo(size.width * 0.28f, size.height * 0.16f)
+        lineTo(size.width * 0.82f, size.height * 0.5f)
+        lineTo(size.width * 0.28f, size.height * 0.84f)
+        close()
+    }
+    drawPath(p, c)
+}
+
+val StopGlyph: Glyph = { c ->
+    drawRoundRect(
+        c, topLeft = Offset(size.width * 0.22f, size.height * 0.22f), size = Size(size.width * 0.56f, size.height * 0.56f),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.06f),
+    )
+}
+
+/** A square icon control, 40 dp: the top bar and panel headers. */
+@Composable
+fun IconButton(
+    glyph: Glyph,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = Colors.text,
+    size: Dp = Dimens.touch,
+    glyphSize: Dp = 20.dp,
+) {
+    Box(
+        modifier
+            .size(size)
+            .clip(ButtonShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(glyphSize)) { glyph(if (enabled) tint else Colors.dim.copy(alpha = 0.45f)) }
+    }
+}
+
+/**
+ * The header of a panel: title (with optional previous and next), whatever
+ * the panel puts in its strip, and a close button at the far right.
+ */
+@Composable
+fun PanelHeader(
+    title: String,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPrev: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    Row(
+        modifier.fillMaxWidth().height(52.dp).background(Colors.panel).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onPrev != null) IconButton(ChevronLeftGlyph, onClick = onPrev)
+        Text(
+            title,
+            style = TitleStyle.copy(fontSize = 17.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 6.dp),
+        )
+        if (onNext != null) IconButton(ChevronRightGlyph, onClick = onNext)
+        Spacer(Modifier.weight(1f))
+        actions()
+        IconButton(CloseGlyph, onClick = onClose)
+    }
 }
 
 /** Small filled status dot. */

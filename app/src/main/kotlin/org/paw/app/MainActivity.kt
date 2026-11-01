@@ -41,10 +41,6 @@ import org.paw.app.ui.TrackDetailScreen
 private sealed interface Nav {
     data object Projects : Nav
     data object Song : Nav
-    data class TrackDetail(val trackId: Int) : Nav
-    data object Takes : Nav
-    data object Metronome : Nav
-    data class Sampler(val trackId: Int, val patternId: Int?) : Nav
 
     /** Settings, opened from the song list or from inside a song. */
     data class Options(val fromSong: Boolean) : Nav
@@ -284,52 +280,22 @@ class MainActivity : ComponentActivity() {
                                     entries = store.list()
                                     nav = Nav.Projects
                                 },
-                                onOpenTrack = { nav = Nav.TrackDetail(it) },
-                                onOpenTakes = { nav = Nav.Takes },
-                                onOpenOptions = { nav = Nav.Options(fromSong = true) },
-                                onOpenMetronome = { nav = Nav.Metronome },
-                                onOpenSampler = { trackId, patternId -> nav = Nav.Sampler(trackId, patternId) },
+                                onOpenSettings = { nav = Nav.Options(fromSong = true) },
+                                onRename = { newName ->
+                                    // The song is its folder: close it, rename, open it again.
+                                    val dir = c.projectDir
+                                    if (newName == c.song.name || store.exists(newName)) {
+                                        newName == c.song.name
+                                    } else {
+                                        c.stop()
+                                        Engine.closeStreams()
+                                        controller = null
+                                        val ok = store.rename(dir, newName)
+                                        openSong(if (ok) store.dirFor(newName) else dir)
+                                        ok
+                                    }
+                                },
                             )
-                        }
-                    }
-
-                    is Nav.TrackDetail -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            TrackDetailScreen(c, here.trackId, onBack = { nav = Nav.Song })
-                        }
-                    }
-
-                    Nav.Takes -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            RecordingsScreen(c, onBack = { nav = Nav.Song })
-                        }
-                    }
-
-                    Nav.Metronome -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            MetronomeScreen(c, onBack = { nav = Nav.Song })
-                        }
-                    }
-
-                    is Nav.Sampler -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            SamplerScreen(c, here.trackId, here.patternId, onBack = { nav = Nav.Song })
                         }
                     }
 
