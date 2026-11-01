@@ -46,6 +46,11 @@ object Engine {
      *  transport, playhead) and adopts [gen]. Leaves the streams open. */
     external fun openSong(gen: Long)
 
+    /** The parallel arrays describe the track's audio clips in the song's own
+     *  list order, which the engine treats as a stack: where clips overlap,
+     *  the one later in the list is heard and the earlier ones are not. New
+     *  takes are appended, so they play on top. [mixdownAddTrack] follows the
+     *  same rule. */
     external fun syncClips(
         gen: Long,
         trackId: Int,
@@ -225,6 +230,7 @@ object Engine {
         hitVelocities: FloatArray,
     )
 
+    /** Clips in song list order, stacked as in [syncClips]. */
     external fun mixdownAddTrack(
         trackId: Int,
         isMaster: Boolean,

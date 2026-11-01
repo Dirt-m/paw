@@ -77,6 +77,9 @@ std::vector<float> toFloatVector(JNIEnv* env, jfloatArray arr) {
     return out;
 }
 
+// Keeps the arrays' order: the clip list is a stack (later clips play over
+// earlier ones where they overlap, see Timeline.h), so index i here is index i
+// of the song's clip list.
 std::vector<ClipRef> toClips(JNIEnv* env, jobjectArray paths, jlongArray srcStarts,
                              jlongArray lengths, jlongArray timelineStarts,
                              jlongArray fadeIns, jlongArray fadeOuts) {

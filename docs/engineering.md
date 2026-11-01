@@ -17,7 +17,7 @@ Deleting a clip only drops the reference, and undo restores it. Two deliberate
 exceptions. A record pass that captured zero frames leaves a header-only file, which
 is deleted when the pass finalizes; the startup sweep for leftovers also requires the
 file to be unreferenced and exactly header-sized, so a corrupt real take can never be
-caught by it. And the user can delete a recording from disk on the Recordings screen,
+caught by it. And the user can delete a recording from disk in the Takes panel,
 behind a confirmation, refused while any clip still uses it.
 
 Both orientations. Layouts adapt in place. Rotation must not recreate the activity or
@@ -46,6 +46,20 @@ position and stops popping, the disk thread flushes and re-renders, then publish
 "primed". UI and engine talk through lock-free queues and atomics. The header comment
 in `AudioEngine.h` has the full thread contracts.
 
+Overlapping clips on an audio track do not sum. A track's clip list is a stack in
+list order, and new takes are appended, so after a punch-in only the new take is heard
+where it covers the old one, and the old clip plays on wherever it is uncovered. Both
+clips stay in the song. Where the audible take changes inside an older clip, the top
+clip's edge ramps over at least 240 frames (5 ms at 48 kHz) so the switch is a linear
+crossfade rather than a click; a longer fade on that edge is the crossfade itself and
+reveals the take underneath instead of dipping to silence. An edge with nothing under
+it keeps exactly its own fade, and clips that only abut are untouched, so a split
+still renders bit for bit. The order is carried unchanged from the song model through
+`Engine.syncClips` and the JNI bridge, and the timeline draws in the same order, last
+on top. `TimelineRenderer` does the compositing on the disk thread, and the offline
+mixdown uses the same renderer, so a bounce matches playback. Pattern clips on beat
+tracks play through the sampler and are not part of this.
+
 Recording is capture-first: input lands in take files regardless of playback state, a
 yanked cable finalizes the takes rather than losing them, and the controller collects
 them into clips afterwards.
@@ -61,7 +75,7 @@ uses what its open streams report, learned on first use and remembered per route
 Bluetooth runs 150 to 300 ms against USB's 10, so one global constant would drop a
 Bluetooth overdub a fifth of a second late.
 
-I/O is device-aware. A track's input is a (device, channel) pair; the track screen
+I/O is device-aware. A track's input is a (device, channel) pair; the inspector
 lists every connected interface with its channels plus the phone mic, and the engine's
 single input stream follows whichever device the armed tracks reference. Output is a
 list on the master screen: Automatic plus every connected playback endpoint
@@ -196,7 +210,7 @@ replaces the JNI engine with deterministic fakes; keep its effect catalog in ste
 `BuiltinEffects.cpp`.
 
 Host-side C++ checks live in `tools/`: `engine_sanity.cpp` (WAV round trips, timeline
-placement, mixdown), `effects_sanity.cpp` (DSP behaviour per effect) and
+placement, take stacking, mixdown), `effects_sanity.cpp` (DSP behaviour per effect) and
 `sampler_sanity.cpp` (slice loading, the voice pool). The build line for each is in
 its header. Run them after touching the pure C++ layers.
 

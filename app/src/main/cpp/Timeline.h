@@ -26,7 +26,8 @@ struct ClipRef {
 // Renders windows of a clip list into interleaved stereo float buffers.
 // Owns its readers and scratch, so each consumer (prefetch thread, offline
 // mixdown) keeps its own instance and no locking is needed, because take
-// files are immutable. Missing/broken takes render silence and are counted.
+// files are immutable. Missing/broken takes are counted and render nothing:
+// silence, or whatever older take lies under them.
 //
 // Both caches are bounded by what the song currently references, not by what
 // it has ever referenced: retain() drops the reader (an open FILE* plus a
@@ -34,10 +35,25 @@ struct ClipRef {
 // any more, and clear() forgets the lot. Without that a long session trends
 // toward EMFILE, and a take that failed to open once (a transient EMFILE, say)
 // stays silent for the life of the process.
+//
+// Overlapping clips do not sum. The clip list is a stack, first entry at the
+// bottom: where clips overlap only the one latest in the list is heard, and
+// the older ones stay referenced and play again wherever nothing covers them.
+// New takes are appended, so the newest is on top. The order is the song
+// model's own clip order, carried unchanged through Engine.syncClips (and the
+// mixdown's track list) and the JNI bridge; the timeline UI draws in that
+// same order, last on top. A change of the audible take inside an older clip
+// crossfades over kTakeCrossfadeFrames (see render()).
 class TimelineRenderer {
 public:
-    // Overwrites dst (numFrames * 2 floats) with the sum of all clips
-    // overlapping [startFrame, startFrame + numFrames).
+    // Length of the crossfade where one take gives way to another: 5 ms at
+    // 48 kHz.
+    static constexpr int64_t kTakeCrossfadeFrames = 240;
+
+    // Overwrites dst (numFrames * 2 floats) with the clips overlapping
+    // [startFrame, startFrame + numFrames), each composited over the ones
+    // before it in the list. The result depends only on the clip list and the
+    // frame, never on how the timeline is cut into windows.
     void render(const std::vector<ClipRef>& clips, int64_t startFrame, int numFrames,
                 float* dstStereo);
 

@@ -30,21 +30,13 @@ import kotlinx.coroutines.Dispatchers
 import org.paw.app.model.InputDevice
 import org.paw.app.model.InputOption
 import org.paw.app.model.ProjectStore
-import org.paw.app.ui.MetronomeScreen
 import org.paw.app.ui.OptionsScreen
 import org.paw.app.ui.ProjectListScreen
 import org.paw.app.ui.SongScreen
-import org.paw.app.ui.RecordingsScreen
-import org.paw.app.ui.SamplerScreen
-import org.paw.app.ui.TrackDetailScreen
 
 private sealed interface Nav {
     data object Projects : Nav
     data object Song : Nav
-    data class TrackDetail(val trackId: Int) : Nav
-    data object Takes : Nav
-    data object Metronome : Nav
-    data class Sampler(val trackId: Int, val patternId: Int?) : Nav
 
     /** Settings, opened from the song list or from inside a song. */
     data class Options(val fromSong: Boolean) : Nav
@@ -84,6 +76,10 @@ class MainActivity : ComponentActivity() {
                 // its own controller.
                 var entries by remember { mutableStateOf(emptyList<ProjectStore.Entry>()) }
                 var songsReady by remember { mutableStateOf(false) }
+                // Held here, not in the song screen, so a visit to Settings
+                // comes back to the same mode, panel and view.
+                val songUi = remember(controller) { org.paw.app.ui.SongUi() }
+                val songTimeline = remember(controller) { org.paw.app.ui.TimelineState() }
                 // Read after the list shows, so a slow card never holds it up.
                 var summaries by remember { mutableStateOf(emptyMap<File, ProjectStore.Summary>()) }
                 LaunchedEffect(entries) {
@@ -244,14 +240,13 @@ class MainActivity : ComponentActivity() {
                         summaries = summaries,
                         loading = !songsReady,
                         onOpen = { openSong(it.dir) },
-                        onCreate = { name ->
-                            // The first input that is actually there: an
-                            // interface if one is plugged in, else the mic.
-                            val input = usbInputs.firstOrNull()
-                                ?.let { InputDevice.Usb(it.name) } ?: InputDevice.Mic
-                            if (!store.exists(name)) store.create(name, input)
+                        onCreate = {
+                            // On the first interface that is plugged in, armed
+                            // and ready; without one, on the mic and unarmed.
+                            val input = usbInputs.firstOrNull()?.let { InputDevice.Usb(it.name) }
+                            val song = store.createIdea(input, armed = input != null)
                             entries = store.list()
-                            openSong(store.dirFor(name))
+                            openSong(store.dirFor(song.name))
                         },
                         onRename = { entry, newName ->
                             store.rename(entry.dir, newName).also { entries = store.list() }
@@ -277,6 +272,8 @@ class MainActivity : ComponentActivity() {
                             }
                             SongScreen(
                                 controller = c,
+                                ui = songUi,
+                                tl = songTimeline,
                                 onBack = {
                                     c.stop()
                                     Engine.closeStreams()
@@ -284,52 +281,22 @@ class MainActivity : ComponentActivity() {
                                     entries = store.list()
                                     nav = Nav.Projects
                                 },
-                                onOpenTrack = { nav = Nav.TrackDetail(it) },
-                                onOpenTakes = { nav = Nav.Takes },
-                                onOpenOptions = { nav = Nav.Options(fromSong = true) },
-                                onOpenMetronome = { nav = Nav.Metronome },
-                                onOpenSampler = { trackId, patternId -> nav = Nav.Sampler(trackId, patternId) },
+                                onOpenSettings = { nav = Nav.Options(fromSong = true) },
+                                onRename = { newName ->
+                                    // The song is its folder: close it, rename, open it again.
+                                    val dir = c.projectDir
+                                    if (newName == c.song.name || store.exists(newName)) {
+                                        newName == c.song.name
+                                    } else {
+                                        c.stop()
+                                        Engine.closeStreams()
+                                        controller = null
+                                        val ok = store.rename(dir, newName)
+                                        openSong(if (ok) store.dirFor(newName) else dir)
+                                        ok
+                                    }
+                                },
                             )
-                        }
-                    }
-
-                    is Nav.TrackDetail -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            TrackDetailScreen(c, here.trackId, onBack = { nav = Nav.Song })
-                        }
-                    }
-
-                    Nav.Takes -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            RecordingsScreen(c, onBack = { nav = Nav.Song })
-                        }
-                    }
-
-                    Nav.Metronome -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            MetronomeScreen(c, onBack = { nav = Nav.Song })
-                        }
-                    }
-
-                    is Nav.Sampler -> {
-                        val c = controller
-                        if (c == null) {
-                            nav = Nav.Projects
-                        } else {
-                            BackHandler { nav = Nav.Song }
-                            SamplerScreen(c, here.trackId, here.patternId, onBack = { nav = Nav.Song })
                         }
                     }
 

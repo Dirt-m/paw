@@ -33,7 +33,11 @@ import org.paw.app.model.Clip
 import org.paw.app.model.Hit
 import org.paw.app.model.Pattern
 import org.paw.app.model.Sample
+import org.paw.app.model.TRACK_AUDIO
 import org.paw.app.model.TRACK_BEAT
+import org.paw.app.model.barStartFrame
+import org.paw.app.model.framesPerBar
+import org.paw.app.model.framesPerSongBeat
 import org.paw.app.model.defaultGrouping
 import org.paw.app.model.Effect
 import org.paw.app.model.INPUT_CH1
@@ -133,6 +137,10 @@ class SongController(
         private set
     var message: String? by mutableStateOf(null)
     var selectedClip: Pair<Int, Int>? by mutableStateOf(null)  // trackId to clipId
+
+    /** The track the panels act on: a track id or MASTER_TRACK_ID. Selecting
+     *  a clip selects its track too. */
+    var selectedTrack: Int? by mutableStateOf(null)
     var exporting: Boolean by mutableStateOf(false)
     var lastExport: File? by mutableStateOf(null)
 
@@ -173,12 +181,7 @@ class SongController(
 
     private fun applySnapshot(snapshot: Song) {
         val prev = song
-        // Click, count-in and boost are settings, not edits: undo leaves them.
-        val s = snapshot.copy(
-            clickEnabled = prev.clickEnabled,
-            countInBars = prev.countInBars,
-            micBoostDb = prev.micBoostDb,
-        )
+        val s = snapshot.keepingSettingsOf(prev)
         // Tracks present in the engine but absent in the snapshot must go.
         for (t in prev.tracks) if (s.track(t.id) == null) Engine.removeTrack(gen, t.id)
         song = s
@@ -191,6 +194,7 @@ class SongController(
         selectedClip = selectedClip?.takeIf { (tid, cid) ->
             s.track(tid)?.clips?.any { it.id == cid } == true
         }
+        selectedTrack = selectedTrack?.takeIf { s.track(it) != null }
         canUndo = undoStack.isNotEmpty()
         canRedo = redoStack.isNotEmpty()
     }
@@ -244,8 +248,9 @@ class SongController(
         syncMetronome()
     }
 
+    /** 0 (off), 1 or 2 bars of click before a take from stop. */
     fun setCountIn(bars: Int) {
-        saveSettings(song.copy(countInBars = bars.coerceIn(0, 4)))
+        saveSettings(song.copy(countInBars = bars.coerceIn(0, 2)))
     }
 
     // ---- app-wide display settings ----
@@ -259,8 +264,12 @@ class SongController(
      *  continuously under a mid-view playhead. */
     val followSmooth: Boolean get() = prefs.followSmooth
 
+    /** Tempo in quarter notes per minute. Undoable, one step per call. */
     fun setTempo(bpm: Float, beatsPerBar: Int = song.beatsPerBar) {
         val tempo = bpm.coerceIn(30f, 300f)
+        val bpb = beatsPerBar.coerceIn(1, 12)
+        if (tempo == song.tempoBpm && bpb == song.beatsPerBar) return
+        pushUndo()
         // Pattern clips live in musical time: their frames scale with the
         // tempo so they keep their bars. Audio clips stay where they are.
         val ratio = song.tempoBpm / tempo
@@ -272,40 +281,92 @@ class SongController(
                 else it.copy(start = it.start.scaled(), srcStart = it.srcStart.scaled(), length = it.length.scaled())
             })
         }
-        saveSettings(
-            song.copy(
-                tempoBpm = tempo,
-                beatsPerBar = beatsPerBar.coerceIn(1, 12),
-                tracks = tracks,
-            ),
-        )
+        saveSettings(song.copy(tempoBpm = tempo, beatsPerBar = bpb, tracks = tracks))
         syncMetronome()
         syncSampler()
     }
 
-    private fun syncMetronome() {
-        Engine.setMetronome(gen, clickEnabled, song.tempoBpm, song.beatsPerBar)
+    /** The song's time signature: [beatsPerBar] (1 to 12) beats of [beatUnit]
+     *  (4 or 8). The tempo still counts quarters, so nothing on the timeline
+     *  moves. Undoable. */
+    fun setMeter(beatsPerBar: Int, beatUnit: Int) {
+        val bpb = beatsPerBar.coerceIn(1, 12)
+        val unit = if (beatUnit == 8) 8 else 4
+        if (bpb == song.beatsPerBar && unit == song.beatUnit) return
+        pushUndo()
+        saveSettings(song.copy(beatsPerBar = bpb, beatUnit = unit))
+        syncMetronome()
     }
 
-    /** The beat grid the click, the count-in and the transport clock run on. */
+    /** The engine's click counts plain beats per minute, so it gets the song
+     *  beat's rate: in /8 that is twice the quarter-note tempo. */
+    private fun clickBpm(tempo: Float): Float = tempo * song.beatUnit / 4f
+
+    private fun syncMetronome() {
+        Engine.setMetronome(gen, clickEnabled, clickBpm(song.tempoBpm), song.beatsPerBar)
+    }
+
+    /** One song beat in frames, rounded the way the engine's click rounds
+     *  it: the grid the click, the count-in and the transport clock run on. */
     val framesPerBeat: Long
-        get() = (60.0 * song.sampleRate / song.tempoBpm).toLong().coerceAtLeast(1)
+        get() = Math.round(song.framesPerSongBeat).coerceAtLeast(1)
 
     // ---- loop region ----
 
-    /** Minimum loop length: 1 s, comfortably larger than any callback burst. */
+    // The region is an edit and undoable; whether the loop plays is a switch
+    // and is not. Minimum loop length: 1 s, comfortably larger than any
+    // callback burst.
+
+    private fun loopValid(start: Long, end: Long) = end - start >= song.sampleRate
+
+    /** Turns looping on or off over the current region. Not an undo step. */
+    fun setLoopEnabled(on: Boolean) {
+        if (on && !loopValid(song.loopStart, song.loopEnd)) {
+            message = "Loop needs at least one second"
+            return
+        }
+        if (on == song.loopEnabled) return
+        saveSettings(song.copy(loopEnabled = on))
+        syncLoop()
+    }
+
+    /** Sets the loop region and turns the loop on. A region shorter than a
+     *  second is refused. Undoable. */
+    fun setLoopRegion(start: Long, end: Long) {
+        val s0 = start.coerceAtLeast(0)
+        val e0 = end.coerceAtLeast(0)
+        if (!loopValid(s0, e0)) {
+            message = "Loop needs at least one second"
+            return
+        }
+        if (s0 == song.loopStart && e0 == song.loopEnd && song.loopEnabled) return
+        pushUndo()
+        saveSettings(song.copy(loopStart = s0, loopEnd = e0, loopEnabled = true))
+        syncLoop()
+    }
+
+    /** Clears the region and turns the loop off. Undoable. */
+    fun clearLoop() {
+        if (song.loopStart == 0L && song.loopEnd == 0L && !song.loopEnabled) return
+        pushUndo()
+        saveSettings(song.copy(loopStart = 0, loopEnd = 0, loopEnabled = false))
+        syncLoop()
+    }
+
+    /** The older all-in-one call: a new region goes through [setLoopRegion]
+     *  (or [clearLoop] when it is too short), then [enabled] through
+     *  [setLoopEnabled]. */
     fun setLoop(start: Long, end: Long, enabled: Boolean) {
         val s0 = start.coerceAtLeast(0)
         val e0 = end.coerceAtLeast(0)
-        val valid = e0 - s0 >= song.sampleRate
-        val s = song.copy(
-            loopStart = s0,
-            loopEnd = e0,
-            loopEnabled = enabled && valid,
-        )
-        song = s
-        saveFlow.value = s
-        syncLoop()
+        if (s0 != song.loopStart || e0 != song.loopEnd) {
+            if (!loopValid(s0, e0)) {
+                clearLoop()
+                return
+            }
+            setLoopRegion(s0, e0)
+        }
+        setLoopEnabled(enabled)
     }
 
     private fun syncLoop() {
@@ -601,7 +662,7 @@ class SongController(
     }
 
     fun previewTempo(bpm: Float) {
-        Engine.setMetronome(gen, clickEnabled, bpm.coerceIn(30f, 300f), song.beatsPerBar)
+        Engine.setMetronome(gen, clickEnabled, clickBpm(bpm.coerceIn(30f, 300f)), song.beatsPerBar)
     }
 
     fun previewMicBoost(db: Float) {
@@ -615,6 +676,10 @@ class SongController(
     // interval old, and read-modify-writing it across that window races.
 
     fun playPause() {
+        // The song and a pattern loop never play over each other: the engine
+        // only pauses a preview under a running transport, and would bring it
+        // back by itself when the song stops.
+        stopPreview()
         // The answer is the state the engine settled on; adopting it saves
         // the button a poll interval of looking wrong.
         val transport = Engine.transportPlayPause()
@@ -635,6 +700,7 @@ class SongController(
     /** Record button: starts capture (from stop or as punch-in), or punches
      *  out. Which one it is, is the engine's call. */
     fun toggleRecord() {
+        stopPreview()
         // Model-side preconditions, and only when this can't be a punch-out: a
         // track disarmed mid-take must not block stopping it. The engine
         // enforces the real rule either way; these just word it better.
@@ -677,6 +743,7 @@ class SongController(
         val reported = Engine.routeLatencyFrames()
         Latency.learn(context, activeOutputRoute, reported)
         val latency = Latency.frames(context, activeOutputRoute, reported)
+        val before = song
         var s = song
         val touched = mutableListOf<Track>()
         for (i in 0 until minOf(count, paths.size)) {
@@ -702,9 +769,16 @@ class SongController(
                 start = start,
             )
             val updated = track.copy(clips = track.clips + clip)
-            s = s.withTrack(updated).copy(nextClipId = s.nextClipId + 1)
+            s = s.withTrack(updated).copy(
+                nextClipId = s.nextClipId + 1,
+                takeOrigins = s.takeOrigins + (clip.take to clip.start),
+            )
             touched += updated
         }
+        // A take is an undo step of its own, so the next undo takes its clips
+        // off the timeline (the files stay on the recordings screen) instead
+        // of reverting an earlier edit and dropping the take with it.
+        if (touched.isNotEmpty()) pushUndo(before)
         commit(s, *touched.toTypedArray())
         // Starting the take turned the engine loop off (capture is linear).
         syncLoop()
@@ -737,6 +811,7 @@ class SongController(
         commit(song.copy(tracks = song.tracks.filterNot { it.id == trackId }))
         Engine.removeTrack(gen, trackId)
         if (selectedClip?.first == trackId) selectedClip = null
+        if (selectedTrack == trackId) selectedTrack = null
     }
 
     /**
@@ -750,7 +825,81 @@ class SongController(
         commit(song.withTrack(updated), updated)
     }
 
+    // ---- arm and monitor ----
+    // Live switches, not edits: neither is an undo step, and undo leaves them
+    // as they are.
+
+    /**
+     * Arms or disarms a track. The engine opens one input device at a time,
+     * so arming a track on another device than the tracks already armed
+     * disarms those and says so. Channels of the same device can be armed
+     * together.
+     */
+    /**
+     * Points an audio track at an input. An armed track keeps the one device
+     * rule: other armed tracks on a different device are disarmed, as when
+     * arming.
+     */
+    fun setInput(trackId: Int, device: InputDevice, mode: Int) {
+        val track = song.track(trackId) ?: return
+        if (track.inputDevice == device && track.inputMode == mode) return
+        updateTrack(trackId) { it.copy(inputDevice = device, inputMode = mode) }
+        if (track.armed) {
+            setArmed(trackId, false)
+            setArmed(trackId, true)
+        }
+    }
+
+    fun setArmed(trackId: Int, on: Boolean) {
+        val track = song.track(trackId) ?: return
+        if (track.kind != TRACK_AUDIO || track.armed == on) return
+        val disarmed = if (!on || !recordsFrom(track)) emptyList() else song.tracks.filter {
+            it.id != trackId && it.armed && recordsFrom(it) && !sameInput(it.inputDevice, track.inputDevice)
+        }
+        val updated = listOf(track.copy(armed = on)) + disarmed.map { it.copy(armed = false) }
+        commit(updated.fold(song) { s, t -> s.withTrack(t) }, *updated.toTypedArray())
+        if (disarmed.isNotEmpty()) {
+            message = "${disarmed.joinToString(", ") { it.name }} disarmed: " +
+                "${track.name} records from ${inputLabel(track.inputDevice)}"
+        }
+    }
+
+    /** Software monitoring for an armed track. Not an undo step. */
+    fun setMonitor(trackId: Int, on: Boolean) {
+        val track = song.track(trackId) ?: return
+        if (track.kind != TRACK_AUDIO || track.monitor == on) return
+        val updated = track.copy(monitor = on)
+        commit(song.withTrack(updated), updated)
+    }
+
+    private fun recordsFrom(t: Track) = t.inputMode != INPUT_NONE && t.inputDevice != InputDevice.None
+
+    /** "Any interface" is whichever interface is connected first, the same
+     *  rule MainActivity uses to choose the device it opens. */
+    private fun resolveInput(d: InputDevice): InputDevice =
+        if (d == InputDevice.AnyUsb) inputOptions.firstOrNull { it.device.isUsb }?.device ?: d else d
+
+    private fun sameInput(a: InputDevice, b: InputDevice): Boolean {
+        val ra = resolveInput(a)
+        val rb = resolveInput(b)
+        // With no interface connected an unresolved "any interface" may still
+        // turn out to be the named one; keep both armed.
+        if (ra.isUsb && rb.isUsb && (ra == InputDevice.AnyUsb || rb == InputDevice.AnyUsb)) return true
+        return ra == rb
+    }
+
+    private fun inputLabel(d: InputDevice): String = when (val r = resolveInput(d)) {
+        InputDevice.Mic -> "the phone mic"
+        is InputDevice.Usb -> r.name
+        else -> "the interface"
+    }
+
     // ---- clip ops (all reference arithmetic; takes are immutable) ----
+
+    private fun selectClip(trackId: Int, clipId: Int) {
+        selectedClip = trackId to clipId
+        selectedTrack = trackId
+    }
 
     private fun takeFrames(rel: String): Long = peakCache[rel]?.frames
         ?: Engine.wavInfo(absPath(rel))[0]
@@ -810,7 +959,7 @@ class SongController(
         val copy = clip.copy(id = song.nextClipId, start = clip.end)
         val updated = track.copy(clips = track.clips + copy)
         commit(song.withTrack(updated).copy(nextClipId = song.nextClipId + 1), updated)
-        selectedClip = trackId to copy.id
+        selectClip(trackId, copy.id)
     }
 
     /** Moves a clip to the neighboring track (dir -1 = up, +1 = down),
@@ -828,7 +977,7 @@ class SongController(
         val newSrc = src.copy(clips = src.clips.filterNot { it.id == clipId })
         val newDest = dest.copy(clips = dest.clips + clip)
         commit(song.withTrack(newSrc).withTrack(newDest), newSrc, newDest)
-        selectedClip = dest.id to clip.id
+        selectClip(dest.id, clip.id)
     }
 
     fun deleteClip(trackId: Int, clipId: Int) {
@@ -868,6 +1017,11 @@ class SongController(
      *  "recordings are immutable". Refused while any clip references it, so a
      *  delete can never silence the timeline; the screen confirms first. */
     fun deleteRecording(entry: TakeEntry): Boolean {
+        // A take being written has no clip yet and would read as unused.
+        if (status.recording || status.recPending) {
+            message = "Recordings can be deleted once recording stops"
+            return false
+        }
         val used = song.tracks.any { t -> t.clips.any { it.take == entry.rel } }
         if (used) {
             message = "Recording is on the timeline. Remove its clips first"
@@ -904,8 +1058,38 @@ class SongController(
             start = atFrame.coerceAtLeast(0),
         )
         val updated = track.copy(clips = track.clips + clip)
-        commit(song.withTrack(updated).copy(nextClipId = song.nextClipId + 1), updated)
-        selectedClip = trackId to clip.id
+        // An imported take's first placement is its origin.
+        val origins = if (takeRel in song.takeOrigins) song.takeOrigins else song.takeOrigins + (takeRel to clip.start)
+        commit(song.withTrack(updated).copy(nextClipId = song.nextClipId + 1, takeOrigins = origins), updated)
+        selectClip(trackId, clip.id)
+    }
+
+    /** Where [takeRel] was first placed on the timeline, or null when that
+     *  is not known (takes from before origins were kept). */
+    fun originalStartOf(takeRel: String): Long? = song.takeOrigins[takeRel]
+
+    // ---- takes stacked on one track ----
+    // Later in a track's clip list plays on top where clips overlap.
+
+    /** The older clips on [trackId] that [clipId] overlaps, the one right
+     *  under it first. */
+    fun clipsUnder(trackId: Int, clipId: Int): List<Clip> {
+        val track = song.track(trackId) ?: return emptyList()
+        if (track.kind != TRACK_AUDIO) return emptyList()
+        val idx = track.clips.indexOfFirst { it.id == clipId }
+        if (idx < 0) return emptyList()
+        val clip = track.clips[idx]
+        return track.clips.subList(0, idx).filter { it.start < clip.end && clip.start < it.end }.reversed()
+    }
+
+    /** Puts [clipId] on top of whatever it overlaps. Undoable. */
+    fun bringClipToTop(trackId: Int, clipId: Int) {
+        val track = song.track(trackId) ?: return
+        val clip = track.clips.find { it.id == clipId } ?: return
+        if (track.clips.last() == clip) return
+        pushUndo()
+        val updated = track.copy(clips = track.clips.filterNot { it.id == clipId } + clip)
+        commit(song.withTrack(updated), updated)
     }
 
     private fun editClip(trackId: Int, clipId: Int, transform: (Clip) -> Clip) {
@@ -1077,6 +1261,8 @@ class SongController(
      *  preview when anything they depend on changed. */
     private fun syncSampler() {
         val s = song
+        // An undo can take away the pattern that is looping.
+        previewing?.let { if (s.pattern(it) == null) stopPreview() }
         val bank = bankOf(s)
         val bankKey = bank.map { (tid, smp) -> Triple(tid, smp.take, smp.srcStart to smp.length) }
         val hitsKey = listOf(s.tempoBpm, s.patterns, s.tracks.filter { it.kind == TRACK_BEAT }.map { it.clips to it.samples })
@@ -1123,6 +1309,11 @@ class SongController(
 
     /** Loops [patternId] through [trackId]'s kit with the transport stopped. */
     fun startPreview(trackId: Int, patternId: Int) {
+        // Stopping the transport for a preview would end a take mid-performance.
+        if (status.recording || status.recPending) {
+            message = "Stop recording to play the pattern on its own"
+            return
+        }
         if (status.transport != TRANSPORT_STOPPED) stopAll()
         previewing = patternId
         previewTrack = trackId
@@ -1151,7 +1342,9 @@ class SongController(
     fun addBeatTrack(): Int {
         pushUndo()
         val id = song.nextTrackId
-        val n = song.tracks.count { it.kind == TRACK_BEAT } + 1
+        val names = song.tracks.mapTo(HashSet()) { it.name }
+        val n = generateSequence(song.tracks.count { it.kind == TRACK_BEAT } + 1) { it + 1 }
+            .first { "Beats $it" !in names }
         val track = Track(
             id = id, name = "Beats $n", kind = TRACK_BEAT,
             inputDevice = InputDevice.None, inputMode = INPUT_NONE,
@@ -1160,24 +1353,30 @@ class SongController(
         return id
     }
 
-    /** The beat track the sampler screen opens on: the first one, made if
-     *  the song has none. */
-    fun beatTrackForSampler(): Int =
-        song.tracks.firstOrNull { it.kind == TRACK_BEAT }?.id ?: addBeatTrack()
+    /** The first beat track, or null when the song has none. */
+    fun firstBeatTrack(): Int? = song.tracks.firstOrNull { it.kind == TRACK_BEAT }?.id
 
-    /** Turns an audio clip's slice into a sample on a beat track (the first
-     *  one, made if there is none). Trim and split on the timeline are how a
-     *  sample gets cut. */
-    fun sampleFromClip(trackId: Int, clipId: Int) {
-        val src = song.track(trackId) ?: return
-        val clip = src.clips.find { it.id == clipId } ?: return
-        if (clip.isPattern) return
-        val beatId = song.tracks.firstOrNull { it.kind == TRACK_BEAT }?.id
-        if (beatId == null) addBeatTrack() else pushUndo()
-        val beat = song.tracks.first { it.kind == TRACK_BEAT }
+    /**
+     * Turns an audio clip's slice into a sample named [name] on the beat
+     * track [targetTrackId], or on a new beat track when that is null. Trim
+     * and split on the timeline are how a sample gets cut. One undo step,
+     * the new track included. Returns the new sample's id.
+     */
+    fun sampleFromClip(trackId: Int, clipId: Int, targetTrackId: Int?, name: String): Int? {
+        val src = song.track(trackId) ?: return null
+        val clip = src.clips.find { it.id == clipId } ?: return null
+        if (clip.isPattern) return null
+        if (targetTrackId != null && song.track(targetTrackId)?.kind != TRACK_BEAT) {
+            message = "Samples go on beat tracks"
+            return null
+        }
+        val beatId = targetTrackId ?: addBeatTrack()
+        // addBeatTrack already pushed this step's undo entry.
+        if (targetTrackId != null) pushUndo()
+        val beat = song.track(beatId) ?: return null
         val sample = Sample(
             id = song.nextSampleId,
-            name = "${src.name} ${src.clips.sortedBy { it.start }.indexOf(clip) + 1}",
+            name = name.trim().take(24).ifEmpty { "${src.name} ${src.clips.sortedBy { it.start }.indexOf(clip) + 1}" },
             take = clip.take,
             srcStart = clip.srcStart,
             length = clip.length.coerceAtMost(MAX_SAMPLE_FRAMES),
@@ -1185,6 +1384,16 @@ class SongController(
         val updated = beat.copy(samples = beat.samples + sample)
         commit(song.withTrack(updated).copy(nextSampleId = song.nextSampleId + 1))
         message = "Added ${sample.name} to ${beat.name}"
+        return sample.id
+    }
+
+    fun renameSample(trackId: Int, sampleId: Int, name: String) {
+        val t = song.track(trackId) ?: return
+        val sample = t.samples.find { it.id == sampleId } ?: return
+        val trimmed = name.trim().take(24)
+        if (trimmed.isEmpty() || trimmed == sample.name) return
+        pushUndo()
+        commit(song.withTrack(t.copy(samples = t.samples.map { if (it.id == sampleId) it.copy(name = trimmed) else it })))
     }
 
     fun removeSample(trackId: Int, sampleId: Int) {
@@ -1195,39 +1404,144 @@ class SongController(
         commit(song.withTrack(t.copy(samples = t.samples.filterNot { it.id == sampleId })))
     }
 
+    /**
+     * The engine has no live per-sample gain: a sample's level is folded
+     * into its hits' velocities. So a level drag calls beginGesture() once,
+     * then this with undoable=false for every move (each one re-pushes the
+     * hit list), and the gesture is one undo step.
+     */
     fun setSampleGain(trackId: Int, sampleId: Int, gain: Float, undoable: Boolean = true) {
         val t = song.track(trackId) ?: return
         if (undoable) pushUndo()
         commit(song.withTrack(t.copy(samples = t.samples.map { if (it.id == sampleId) it.copy(gain = gain) else it })))
     }
 
-    /** A new empty pattern, placed on [trackId] at the bar at or after the
-     *  playhead. Returns its id. */
+    // ---- patterns ----
+
+    /** The patterns owned by [trackId], in creation order. */
+    fun patternsFor(trackId: Int): List<Pattern> = song.patterns.filter { it.track == trackId }
+
+    /** A new pattern owned by [trackId], empty or a copy of [from]. Nothing
+     *  goes on the timeline. Returns its id. */
     fun newPattern(trackId: Int, from: Pattern? = null): Int {
         pushUndo()
         val id = song.nextPatternId
-        val p = (from ?: Pattern(id = id, name = "")).copy(id = id, name = "Pattern $id")
+        val p = (from ?: Pattern(id = id, name = "")).copy(id = id, name = "Pattern $id", track = trackId)
         commit(song.copy(patterns = song.patterns + p, nextPatternId = id + 1))
-        placePattern(trackId, id, undoable = false)
         return id
     }
 
-    /** Puts a clip of [patternId] on [trackId], one pattern long, at the
-     *  song bar at or after the playhead. */
-    fun placePattern(trackId: Int, patternId: Int, undoable: Boolean = true) {
+    fun renamePattern(patternId: Int, name: String) {
+        val trimmed = name.trim().take(24)
+        if (trimmed.isEmpty()) return
+        editPattern(patternId) { it.copy(name = trimmed) }
+    }
+
+    /** Deletes a pattern no clip uses. Refused, with a message, while any
+     *  clip still plays it. */
+    fun deletePattern(patternId: Int): Boolean {
+        if (song.pattern(patternId) == null) return false
+        if (song.tracks.any { t -> t.clips.any { it.pattern == patternId } }) {
+            message = "Pattern is on the timeline. Remove its clips first"
+            return false
+        }
+        if (previewing == patternId) stopPreview()
+        pushUndo()
+        commit(song.copy(patterns = song.patterns.filterNot { it.id == patternId }))
+        return true
+    }
+
+    /** The 0-based song bar [placePattern] uses: the bar at or after the
+     *  playhead. */
+    fun nextBarIndex(): Int {
+        val i = Math.floor(playheadFrame / song.framesPerBar).toInt()
+        return if (song.barStartFrame(i) < playheadFrame) i + 1 else i
+    }
+
+    /** Puts a clip of [patternId], one pattern long, on [trackId] at the
+     *  0-based song bar [barIndex]. The pattern must belong to the track. */
+    fun placePatternAt(trackId: Int, patternId: Int, barIndex: Int) =
+        placePatternAt(trackId, patternId, barIndex, undoable = true)
+
+    private fun placePatternAt(trackId: Int, patternId: Int, barIndex: Int, undoable: Boolean) {
         val t = song.track(trackId) ?: return
         val p = song.pattern(patternId) ?: return
-        val bar = framesPerBeat * song.beatsPerBar
-        val at = (playheadFrame + bar - 1) / bar * bar
+        if (p.track != trackId) {
+            message = "${p.name} belongs to another beat track"
+            return
+        }
         if (undoable) pushUndo()
         val clip = Clip(
             id = song.nextClipId, take = "", srcStart = 0,
             length = song.framesOf(p.lengthTicks).coerceAtLeast(MIN_CLIP_FRAMES),
-            start = at, pattern = patternId,
+            start = song.barStartFrame(barIndex.coerceAtLeast(0)), pattern = patternId,
         )
         val updated = t.copy(clips = t.clips + clip)
         commit(song.withTrack(updated).copy(nextClipId = song.nextClipId + 1), updated)
-        selectedClip = trackId to clip.id
+        selectClip(trackId, clip.id)
+    }
+
+    /** Puts a clip of [patternId] on [trackId], one pattern long, at the
+     *  song bar at or after the playhead. */
+    fun placePattern(trackId: Int, patternId: Int, undoable: Boolean = true) =
+        placePatternAt(trackId, patternId, nextBarIndex(), undoable)
+
+    /** Makes the pattern clip [clipId] play [patternId] instead, keeping its
+     *  place and length. The pattern must belong to the track. Undoable. */
+    fun setClipPattern(trackId: Int, clipId: Int, patternId: Int) {
+        val p = song.pattern(patternId) ?: return
+        if (p.track != trackId) {
+            message = "${p.name} belongs to another beat track"
+            return
+        }
+        editClip(trackId, clipId) { if (it.isPattern) it.copy(pattern = patternId) else it }
+    }
+
+    /**
+     * Copies the pattern clip [clipId] plays into a new pattern named
+     * "<name> 2" (or the next free number; a variation of a variation counts
+     * on from the original's name) and gives it to that clip alone,
+     * so it can change without touching the other clips. One undo step.
+     * Returns the new pattern's id, or -1 when [clipId] is no pattern clip.
+     */
+    fun makeVariation(trackId: Int, clipId: Int): Int {
+        val track = song.track(trackId) ?: return -1
+        val clip = track.clips.find { it.id == clipId } ?: return -1
+        val src = song.pattern(clip.pattern) ?: return -1
+        val names = song.patterns.mapTo(HashSet()) { it.name }
+        // A variation of "Groove 2" is "Groove 3", not "Groove 2 2".
+        val base = Regex("^(.+) \\d+$").find(src.name)?.groupValues?.get(1)?.takeIf { it in names } ?: src.name
+        var n = 2
+        while ("$base $n" in names) n++
+        pushUndo()
+        val id = song.nextPatternId
+        val copy = src.copy(id = id, name = "$base $n".take(24), track = trackId)
+        val updated = track.copy(clips = track.clips.map { if (it.id == clipId) it.copy(pattern = id) else it })
+        commit(
+            song.withTrack(updated).copy(patterns = song.patterns + copy, nextPatternId = id + 1),
+            updated,
+        )
+        return id
+    }
+
+    /** How many times [clip]'s pattern plays over it, a partial pass counted
+     *  as one. 1 for anything that is not a pattern clip. */
+    fun patternRepeats(clip: Clip): Int {
+        val p = song.pattern(clip.pattern) ?: return 1
+        val len = song.framesOf(p.lengthTicks)
+        if (len <= 0) return 1
+        // A frame of slack for clips whose length was rounded by a tempo change.
+        return ((clip.length - 1 + len - 1) / len).toInt().coerceAtLeast(1)
+    }
+
+    /** Stretches or shrinks a pattern clip to exactly [repeats] passes of its
+     *  pattern. Undoable. */
+    fun setPatternRepeats(trackId: Int, clipId: Int, repeats: Int) {
+        editClip(trackId, clipId) { c ->
+            val p = song.pattern(c.pattern) ?: return@editClip c
+            val len = song.framesOf(p.lengthTicks).coerceAtLeast(MIN_CLIP_FRAMES)
+            c.copy(length = len * repeats.coerceAtLeast(1)).clampFades()
+        }
     }
 
     /** undoable=false for a gesture that already pushed (beginGesture). */
@@ -1254,6 +1568,30 @@ class SongController(
         editPattern(patternId) {
             val b = beats.coerceIn(1, 16)
             it.copy(beats = b, unit = unit, grouping = if (b == it.beats) it.grouping else defaultGrouping(b))
+        }
+    }
+
+    /**
+     * The whole layout of a pattern in one undo step: [beats] (1 to 16) of
+     * [unit] (4, 8 or 16) per bar, [bars] (1 to 16), [stepsPerBeat] (1 to 4)
+     * and the [grouping] of the beats, which falls back to the default when
+     * it does not add up to [beats]. When the unit changes the step keeps its
+     * length where it can, so sixteenth steps stay sixteenths: 4 steps of a
+     * quarter become 2 of an eighth and 1 of a sixteenth.
+     */
+    fun setPatternLayout(patternId: Int, beats: Int, unit: Int, bars: Int, stepsPerBeat: Int, grouping: List<Int>) {
+        editPattern(patternId) { p ->
+            val b = beats.coerceIn(1, 16)
+            val u = if (unit in listOf(4, 8, 16)) unit else p.unit
+            var steps = stepsPerBeat.coerceIn(1, 4)
+            if (u != p.unit && steps * p.unit % u == 0 && steps * p.unit / u in 1..4) steps = steps * p.unit / u
+            p.copy(
+                beats = b,
+                unit = u,
+                bars = bars.coerceIn(1, 16),
+                stepsPerBeat = steps,
+                grouping = if (grouping.sum() == b && grouping.all { it > 0 }) grouping else defaultGrouping(b),
+            )
         }
     }
 

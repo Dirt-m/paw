@@ -999,6 +999,8 @@ void AudioEngine::syncTrackClips(int64_t gen, int trackId, std::vector<ClipRef> 
     TrackRT* tr = trackForParamsLocked(trackId);
     // An identical list must not flush: callers resync clips as a side effect
     // of param edits, and each flush is an audible re-prime stall mid-play.
+    // The comparison is by position, because order is meaningful: a later
+    // clip plays over an earlier one (Timeline.h), so a reorder is a change.
     const bool changed =
             clips.size() != tr->clips.size() ||
             !std::equal(clips.begin(), clips.end(), tr->clips.begin(),

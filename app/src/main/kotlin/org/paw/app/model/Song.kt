@@ -102,11 +102,13 @@ data class Hit(
  * A pattern has its own time signature: [beats] of [unit] (4 = quarter,
  * 8 = eighth, 16 = sixteenth) per bar, felt in [grouping] (2+2+3 for 7/8), with
  * [stepsPerBeat] grid steps per beat. Positions are ticks, so a pattern keeps
- * its shape when the tempo changes.
+ * its shape when the tempo changes. [track] is the beat track that owns it:
+ * its hits name samples in that track's kit.
  */
 data class Pattern(
     val id: Int,
     val name: String,
+    val track: Int = 0,
     val beats: Int = 4,
     val unit: Int = 4,
     val grouping: List<Int> = listOf(4),
@@ -170,14 +172,18 @@ data class Song(
     val patterns: List<Pattern> = emptyList(),
     val nextPatternId: Int = 1,
     val nextSampleId: Int = 1,
-    val tempoBpm: Float = 120f,     // metronome grid; frame 0 = beat 1
+    val tempoBpm: Float = 120f,     // quarter notes per minute; frame 0 = beat 1
     val beatsPerBar: Int = 4,
+    val beatUnit: Int = 4,          // 4 or 8: what one counted beat is
     val loopStart: Long = 0,        // frames; loop plays [loopStart, loopEnd)
     val loopEnd: Long = 0,
     val loopEnabled: Boolean = false,
     val clickEnabled: Boolean = false,
     val countInBars: Int = 0,       // bars of click before a take from stop
     val micBoostDb: Float = 16f,    // phone mic only; interfaces stay at unity
+    // Where each take's first clip was placed (take path to timeline frame),
+    // so a take can go back where it was recorded after its clips are gone.
+    val takeOrigins: Map<String, Long> = emptyMap(),
 ) {
     val endFrame: Long
         get() = tracks.maxOfOrNull { t -> t.clips.maxOfOrNull { it.end } ?: 0L } ?: 0L
@@ -193,6 +199,76 @@ data class Song(
     fun withTrack(updated: Track): Song =
         if (updated.id == MASTER_TRACK_ID) copy(master = updated)
         else copy(tracks = tracks.map { if (it.id == updated.id) updated else it })
+
+    /**
+     * This snapshot with everything undo and redo must leave alone taken from
+     * [current]. These are settings and live switches, not edits: the click,
+     * the count-in, the mic boost, each track's arm and monitor switches,
+     * whether the loop plays, and the take origins (a record of history that
+     * stays true whatever the timeline looks like). A loop left on over a
+     * region too short to play is switched off.
+     */
+    fun keepingSettingsOf(current: Song): Song {
+        val live = (current.tracks + current.master).associateBy { it.id }
+        fun Track.keep() = live[id]?.let { copy(armed = it.armed, monitor = it.monitor) } ?: this
+        return copy(
+            clickEnabled = current.clickEnabled,
+            countInBars = current.countInBars,
+            micBoostDb = current.micBoostDb,
+            tracks = tracks.map { it.keep() },
+            master = master.keep(),
+            loopEnabled = current.loopEnabled && loopEnd - loopStart >= sampleRate,
+            takeOrigins = current.takeOrigins,
+        )
+    }
+}
+
+// ---- musical time ----
+// The tempo counts quarter notes, so an eighth lasts the same in 4/4 and in
+// 7/8. A song beat is one beatUnit note and a bar is beatsPerBar of them;
+// timeline frame 0 is the downbeat of bar 1.
+
+/** Bar, beat (both 1-based) and hundredths of a beat. */
+data class BarBeat(val bar: Int, val beat: Int, val sub: Int)
+
+/** What a drag or a placement snaps to. Off leaves frames alone. */
+enum class SnapGrid { Bar, Beat, Off }
+
+val Song.framesPerSongBeat: Double
+    get() = sampleRate * 60.0 / tempoBpm * 4.0 / beatUnit
+
+val Song.framesPerBar: Double
+    get() = framesPerSongBeat * beatsPerBar
+
+/** First frame of the 0-based bar [barIndex]. */
+fun Song.barStartFrame(barIndex: Int): Long = Math.round(barIndex * framesPerBar)
+
+fun Song.barBeatAt(frame: Long): BarBeat {
+    val beats = frame.coerceAtLeast(0) / framesPerSongBeat
+    // Guards against a frame a hair under a beat line reading as sub 100.
+    val whole = Math.floor(beats + 1e-9).toLong()
+    val sub = ((beats - whole) * 100).toInt().coerceIn(0, 99)
+    val bpb = beatsPerBar.coerceAtLeast(1)
+    return BarBeat(bar = (whole / bpb).toInt() + 1, beat = (whole % bpb).toInt() + 1, sub = sub)
+}
+
+private fun Song.gridFrames(grid: SnapGrid): Double? = when (grid) {
+    SnapGrid.Bar -> framesPerBar
+    SnapGrid.Beat -> framesPerSongBeat
+    SnapGrid.Off -> null
+}
+
+/** [frame] moved to the nearest line of [grid]. */
+fun Song.snapFrame(frame: Long, grid: SnapGrid): Long {
+    val unit = gridFrames(grid) ?: return frame
+    return Math.round(Math.round(frame / unit) * unit)
+}
+
+/** A distance rounded to whole units of [grid], for drags that keep a
+ *  clip's offset from the grid. */
+fun Song.snapDelta(delta: Long, grid: SnapGrid): Long {
+    val unit = gridFrames(grid) ?: return delta
+    return Math.round(Math.round(delta / unit) * unit)
 }
 
 // ---- JSON (project.json) ----
@@ -227,6 +303,7 @@ private fun Sample.toJson() = JSONObject().apply {
 private fun Pattern.toJson() = JSONObject().apply {
     put("id", id)
     put("name", name)
+    put("track", track)
     put("beats", beats)
     put("unit", unit)
     put("grouping", JSONArray(grouping))
@@ -271,12 +348,14 @@ fun Song.toJson(): JSONObject = JSONObject().apply {
     put("nextSampleId", nextSampleId)
     put("tempoBpm", tempoBpm.toDouble())
     put("beatsPerBar", beatsPerBar)
+    put("beatUnit", beatUnit)
     put("loopStart", loopStart)
     put("loopEnd", loopEnd)
     put("loopEnabled", loopEnabled)
     put("clickEnabled", clickEnabled)
     put("countInBars", countInBars)
     put("micBoostDb", micBoostDb.toDouble())
+    put("takeOrigins", JSONObject().apply { for ((take, frame) in takeOrigins) put(take, frame) })
     // Older manifests may carry a "trash" array. It is ignored on load, which
     // orphans those clip references but no audio.
 }
@@ -311,12 +390,15 @@ private fun sampleFromJson(o: JSONObject) = Sample(
     gain = o.optDouble("gain", 1.0).toFloat(),
 )
 
+/** [track] is -1 when the manifest predates pattern owners; songFromJson
+ *  then picks one. */
 private fun patternFromJson(o: JSONObject): Pattern {
     val grouping = o.getJSONArray("grouping")
     val hits = o.getJSONArray("hits")
     return Pattern(
         id = o.getInt("id"),
         name = o.getString("name"),
+        track = o.optInt("track", -1),
         beats = o.getInt("beats"),
         unit = o.getInt("unit"),
         grouping = (0 until grouping.length()).map { grouping.getInt(it) },
@@ -359,28 +441,50 @@ private fun trackFromJson(o: JSONObject): Track {
     )
 }
 
+/**
+ * The owner of a pattern saved before patterns had one: the beat track whose
+ * kit holds the samples its hits name, else the first beat track with a clip
+ * of it, else the first beat track, else 0.
+ */
+private fun ownerFor(p: Pattern, tracks: List<Track>): Int {
+    val beat = tracks.filter { it.kind == TRACK_BEAT }
+    val used = p.hits.mapTo(HashSet()) { it.sample }
+    val kits = beat.filter { t -> t.samples.any { it.id in used } }
+    if (kits.size == 1) return kits[0].id
+    beat.firstOrNull { t -> t.clips.any { it.pattern == p.id } }?.let { return it.id }
+    return beat.firstOrNull()?.id ?: 0
+}
+
 /** [legacy] supplies what a manifest from before a field existed lacks. */
 fun songFromJson(o: JSONObject, legacy: Song = Song(name = "")): Song {
     val tracks = o.getJSONArray("tracks")
     val patterns = o.optJSONArray("patterns")
+    val origins = o.optJSONObject("takeOrigins")
+    val trackList = (0 until tracks.length()).map { trackFromJson(tracks.getJSONObject(it)) }
     return Song(
         name = o.getString("name"),
         sampleRate = o.getInt("sampleRate"),
-        tracks = (0 until tracks.length()).map { trackFromJson(tracks.getJSONObject(it)) },
+        tracks = trackList,
         master = trackFromJson(o.getJSONObject("master")),
         nextTrackId = o.getInt("nextTrackId"),
         nextClipId = o.getInt("nextClipId"),
-        patterns = patterns?.let { a -> (0 until a.length()).map { patternFromJson(a.getJSONObject(it)) } }
-            ?: emptyList(),
+        patterns = patterns?.let { a ->
+            (0 until a.length()).map { i ->
+                val p = patternFromJson(a.getJSONObject(i))
+                if (p.track >= 0) p else p.copy(track = ownerFor(p, trackList))
+            }
+        } ?: emptyList(),
         nextPatternId = o.optInt("nextPatternId", 1),
         nextSampleId = o.optInt("nextSampleId", 1),
         tempoBpm = o.optDouble("tempoBpm", 120.0).toFloat(),
         beatsPerBar = o.optInt("beatsPerBar", 4),
+        beatUnit = o.optInt("beatUnit", 4).let { if (it == 8) 8 else 4 },
         loopStart = o.optLong("loopStart", 0),
         loopEnd = o.optLong("loopEnd", 0),
         loopEnabled = o.optBoolean("loopEnabled", false),
         clickEnabled = o.optBoolean("clickEnabled", legacy.clickEnabled),
         countInBars = o.optInt("countInBars", legacy.countInBars),
         micBoostDb = o.optDouble("micBoostDb", legacy.micBoostDb.toDouble()).toFloat(),
+        takeOrigins = origins?.keys()?.asSequence()?.associateWith { origins.getLong(it) } ?: emptyMap(),
     )
 }
