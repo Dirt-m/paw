@@ -208,7 +208,8 @@ fun SongScreen(
             // In a short window the modes and clip actions live in the top
             // bar, so the lanes keep their height.
             if (!short) {
-                if (clipSelected) ClipBar(controller, ui, tl, compact, Modifier.fillMaxWidth())
+                // Clip actions belong to the timeline: a panel over it gets the modes.
+                if (clipSelected && panel == null) ClipBar(controller, ui, tl, compact, Modifier.fillMaxWidth())
                 else ModeBar(ui, Modifier.fillMaxWidth())
             }
             TransportBar(controller, ui, tl, compact = compact, short = short)
