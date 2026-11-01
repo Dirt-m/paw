@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -37,10 +38,14 @@ private val STEPS = listOf(1, 2, 3, 4)
 @Composable
 internal fun MeterPanel(controller: SongController, ui: SongUi, patternId: Int, modifier: Modifier = Modifier) {
     val p = controller.song.pattern(patternId)
+    if (p == null) {
+        // Gone under the panel: deleted, or its creation undone.
+        LaunchedEffect(patternId) { ui.close() }
+        return
+    }
     Column(modifier.fillMaxSize().background(Colors.bg)) {
-        PanelHeader(p?.name ?: "Pattern", onClose = ui::close)
+        PanelHeader(p.name, onClose = ui::close)
         Box(Modifier.fillMaxWidth().height(1.dp).background(Colors.line))
-        if (p == null) return@Column
 
         fun set(
             beats: Int = p.beats,

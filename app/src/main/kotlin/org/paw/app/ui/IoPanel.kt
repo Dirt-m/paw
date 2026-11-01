@@ -88,8 +88,9 @@ internal fun IoPanel(controller: SongController, ui: SongUi, modifier: Modifier)
             }
             PanelDivider()
             val context = LocalContext.current
-            // A JNI call that takes the engine's control lock: once per route.
-            val latencyFrames = remember(controller.activeOutputRoute) {
+            // A JNI call that takes the engine's control lock: once per route,
+            // and again when the stream reopens on it.
+            val latencyFrames = remember(controller.activeOutputRoute, st.outputOpen) {
                 Latency.frames(context, controller.activeOutputRoute, Engine.routeLatencyFrames())
             }
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {

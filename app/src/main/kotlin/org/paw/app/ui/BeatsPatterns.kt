@@ -72,7 +72,7 @@ internal fun BeatsPatternList(
                 }
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Colors.line))
+        Line()
         val name = renaming
         Row(
             Modifier.fillMaxWidth().padding(Dimens.gap),
@@ -95,11 +95,16 @@ internal fun BeatsPatternList(
                     onSelect(controller.newPattern(trackId, from = current))
                 }, modifier = Modifier.weight(1f), padding = 8.dp)
                 AppButton("Rename", onClick = { renaming = current.name }, modifier = Modifier.weight(1f), padding = 8.dp)
-                AppButton("Delete", accent = Colors.red, onClick = {
+                // A pattern the timeline plays can't go; the button says why.
+                val inUse = controller.song.tracks.any { t -> t.clips.any { it.pattern == current.id } }
+                AppButton(if (inUse) "In use" else "Delete", accent = Colors.red, enabled = !inUse, onClick = {
                     if (controller.deletePattern(current.id)) onSelect(null)
                 }, modifier = Modifier.weight(1f), padding = 8.dp)
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Colors.line))
+        Line()
     }
 }
+
+@Composable
+private fun Line() = Box(Modifier.fillMaxWidth().height(1.dp).background(Colors.line))

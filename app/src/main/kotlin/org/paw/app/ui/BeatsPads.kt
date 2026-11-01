@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,8 +39,8 @@ import org.paw.app.SongController
 import org.paw.app.model.Pattern
 import org.paw.app.model.Sample
 
-// The kit as pads to play by hand. A pad fires the moment a finger lands and
-// each pad takes its own finger, so two sounds hit together play together.
+// The kit as pads to play by hand. A pad fires the moment a finger lands,
+// each pad takes its own fingers, so two sounds hit together play together.
 // While the pattern previews, each pad lights faintly as the grid plays it.
 
 private val PadShape = RoundedCornerShape(10.dp)
@@ -117,7 +117,15 @@ private fun Pad(name: String, sequencedAt: Int, modifier: Modifier, onHit: () ->
                     hit()
                     down = true
                     scope.launch { flash.snapTo(1f) }
-                    waitForUpOrCancellation()
+                    // A second finger on the same pad strikes it again, so
+                    // two fingers can roll on one sound.
+                    do {
+                        val event = awaitPointerEvent()
+                        if (event.changes.any { it.changedToDown() }) {
+                            hit()
+                            scope.launch { flash.snapTo(1f) }
+                        }
+                    } while (event.changes.any { it.pressed })
                     down = false
                     scope.launch { flash.animateTo(0f, tween(220)) }
                 }
