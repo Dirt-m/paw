@@ -1,5 +1,6 @@
 package org.paw.app.snap
 
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Test
@@ -64,12 +65,34 @@ class PanelSnapshots : SnapshotBase() {
         songWith(c, panel(SongPanel.Takes)); snap("takes-portrait")
     }
 
+    /** The ▾ on a row lists every audio track to add the take to. */
+    @Test fun takes_chooser_portrait() {
+        songWith(controller(), panel(SongPanel.Takes))
+        compose.onAllNodesWithText("▾")[0].performClick()
+        snap("takes-chooser-portrait")
+    }
+
+    /** Two tracks with one name keep separate groups. */
+    @Test fun takes_same_names_portrait() {
+        val c = controller()
+        c.renameTrack(2, "Guitar")
+        c.message = null
+        songWith(c, panel(SongPanel.Takes)); snap("takes-same-names-portrait")
+    }
+
     @Test @Config(qualifiers = "+land")
     fun takes_landscape() { songWith(controller(), panel(SongPanel.Takes)); snap("takes-landscape") }
 
     @Test fun takes_empty_portrait() { songWith(emptyController(app), panel(SongPanel.Takes)); snap("takes-empty-portrait") }
 
     @Test fun tempo_portrait() { songWith(controller(), panel(SongPanel.Tempo)); snap("tempo-portrait") }
+
+    @Test fun tempo_click_on_portrait() {
+        val c = controller()
+        c.setClick(true)
+        c.setMeter(7, 8)
+        songWith(c, panel(SongPanel.Tempo)); snap("tempo-click-on-portrait")
+    }
 
     @Test @Config(qualifiers = "+land")
     fun tempo_landscape() { songWith(controller(), panel(SongPanel.Tempo)); snap("tempo-landscape") }

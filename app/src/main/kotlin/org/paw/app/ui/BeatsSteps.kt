@@ -48,12 +48,15 @@ import org.paw.app.model.Sample
 // sound's name, level, audition and removal on the row of its steps.
 
 private val LabelShape = RoundedCornerShape(Dimens.corner)
-private val HEAD_H = 20.dp
+/** The beat numbers over the grid; the kit view keeps the space empty so
+ *  its rows sit where the grid's do. */
+internal val BeatsHeadH = 20.dp
 private const val FIT_STEPS = 16
 private val CELL_MAX = 64.dp
 
 /**
- * The grid of [pattern] over [samples], or their kit rows when [kit]. Rows
+ * The grid of [pattern] over [samples], or their kit rows when [kit], on
+ * the same row height so switching keeps every sound in its place. Rows
  * grow from [rowMin] to [rowMax] to fill the height and scroll past it. With
  * no pattern the grid is an empty bar of 4/4 and the first tap on it makes the
  * pattern, through [onFirstStep].
@@ -72,9 +75,9 @@ internal fun BeatsSteps(
 ) {
     BoxWithConstraints(modifier) {
         val n = samples.size.coerceAtLeast(1)
+        val rowH = ((maxHeight - BeatsHeadH - Dimens.gap) / n).coerceIn(rowMin, rowMax)
         if (kit) {
-            val rowH = ((maxHeight - Dimens.gap) / n).coerceIn(rowMin, 56.dp)
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 4.dp)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = BeatsHeadH)) {
                 for (s in samples) {
                     androidx.compose.runtime.key(s.id) { KitRow(controller, trackId, s, rowH) }
                 }
@@ -83,12 +86,11 @@ internal fun BeatsSteps(
         }
 
         val p = pattern ?: Pattern(id = -1, name = "")
-        val rowH = ((maxHeight - HEAD_H - Dimens.gap) / n).coerceIn(rowMin, rowMax)
         val gridW = maxWidth - BeatsLabelW - Dimens.gap * 2
         val cellW = (gridW / p.steps.coerceIn(1, FIT_STEPS)).coerceAtMost(CELL_MAX)
         val hScroll = rememberScrollState()
         Column(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth().height(HEAD_H)) {
+            Row(Modifier.fillMaxWidth().height(BeatsHeadH)) {
                 Box(Modifier.width(BeatsLabelW + Dimens.gap * 3 / 2))
                 Box(Modifier.weight(1f).horizontalScroll(hScroll)) { BeatNumbers(p, cellW) }
             }
@@ -145,7 +147,7 @@ private fun groupStarts(p: Pattern): Set<Int> = p.grouping.runningFold(0) { a, g
 @Composable
 private fun BeatNumbers(p: Pattern, cellW: Dp) {
     val groups = groupStarts(p)
-    Row(Modifier.height(HEAD_H), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(BeatsHeadH), verticalAlignment = Alignment.CenterVertically) {
         for (bar in 0 until p.bars) for (beat in 0 until p.beats) {
             // A bar starts with its own number; inside a bar the beats count.
             val label = if (beat == 0 && p.bars > 1) "${bar + 1}." else "${beat + 1}"
@@ -251,13 +253,14 @@ private fun StepCells(
 
 /**
  * One sound of the kit on its grid row: name (tap to rename), level, play
- * and remove. The level slider is live: one undo step per drag, and the
- * sound plays when the finger lifts so the new level is heard.
+ * and remove. A level drag is one undo step, and the sound plays when the
+ * finger lifts so the new level is heard.
  */
 @Composable
 private fun KitRow(controller: SongController, trackId: Int, s: Sample, rowH: Dp) {
     var renaming by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
+    var live by remember { mutableStateOf<Float?>(null) }
     Row(
         Modifier.fillMaxWidth().height(rowH).padding(horizontal = Dimens.gap),
         verticalAlignment = Alignment.CenterVertically,
@@ -292,19 +295,30 @@ private fun KitRow(controller: SongController, trackId: Int, s: Sample, rowH: Dp
                 ) {
                     Text(s.name, style = NameStyle.copy(fontSize = 13.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                // The engine folds a sample's level into its hits, so a drag
+                // only moves the readout and the song takes the level once,
+                // on release: one push of the hits and one undo step.
+                val reset = { if (s.gain != 1f) controller.setSampleGain(trackId, s.id, 1f) }
                 MiniSlider(
-                    value = gainToPos(s.gain),
-                    onChange = { controller.setSampleGain(trackId, s.id, posToGain(it), undoable = false) },
-                    onStart = { controller.beginGesture() },
-                    onCommit = { controller.triggerSample(trackId, s.id) },
-                    onReset = { controller.setSampleGain(trackId, s.id, 1f) },
+                    value = live ?: gainToPos(s.gain),
+                    onChange = { live = it },
+                    onCommit = {
+                        live?.let { pos ->
+                            val gain = posToGain(pos)
+                            if (gain != s.gain) controller.setSampleGain(trackId, s.id, gain)
+                        }
+                        live = null
+                        controller.triggerSample(trackId, s.id)
+                    },
+                    onReset = { live = null; reset() },
                     modifier = Modifier.weight(1f),
                 )
+                val shown = live?.let { posToGain(it) } ?: s.gain
                 ValueReadout(
-                    formatDb(s.gain),
-                    style = MonoStyle.copy(fontSize = 12.sp, color = if (s.gain == 1f) Colors.dim else Colors.text),
+                    formatDb(shown),
+                    style = MonoStyle.copy(fontSize = 12.sp, color = if (shown == 1f) Colors.dim else Colors.text),
                     modifier = Modifier.width(62.dp),
-                    onReset = { controller.setSampleGain(trackId, s.id, 1f) },
+                    onReset = reset,
                 )
                 IconButton(PlayGlyph, onClick = { controller.triggerSample(trackId, s.id) }, tint = Colors.green, glyphSize = 16.dp)
                 IconButton(CloseGlyph, onClick = { confirming = true }, tint = Colors.dim, glyphSize = 16.dp)

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -38,8 +39,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.paw.app.SongController
+import org.paw.app.model.MIN_CLIP_FRAMES
 import org.paw.app.model.Pattern
 import org.paw.app.model.TRACK_BEAT
+import org.paw.app.model.barStartFrame
+import org.paw.app.model.framesPerBar
 
 // Beats mode: one beat track's patterns, its step grid, its kit and its pads,
 // with the song's transport still underneath. Portrait has room for either
@@ -49,6 +53,13 @@ import org.paw.app.model.TRACK_BEAT
 
 private val BeatsShape = RoundedCornerShape(Dimens.corner)
 private val ROW_H = 52.dp
+
+// Portrait step rows grow to fill the height up to STEP_ROW_MAX. With four
+// sounds or fewer, pads at least PADS_MIN tall sit under the grid while the
+// rows can stay STEP_ROW_MIN_WITH_PADS or taller.
+private val STEP_ROW_MAX = 112.dp
+private val STEP_ROW_MIN_WITH_PADS = 56.dp
+private val PADS_MIN = 160.dp
 
 @Composable
 internal fun BeatsMode(controller: SongController, ui: SongUi, compact: Boolean, short: Boolean) {
@@ -81,6 +92,8 @@ internal fun BeatsMode(controller: SongController, ui: SongUi, compact: Boolean,
     var pads by rememberSaveable { mutableStateOf(false) }
     var kit by rememberSaveable { mutableStateOf(false) }
     var listOpen by rememberSaveable { mutableStateOf(false) }
+    // With no pattern left (the last one deleted or undone) there is no list.
+    LaunchedEffect(pattern == null) { if (pattern == null) listOpen = false }
 
     val selectTrack: (Int) -> Unit = { id ->
         if (id != track.id) {
@@ -217,12 +230,30 @@ internal fun BeatsMode(controller: SongController, ui: SongUi, compact: Boolean,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
         } else {
-            BeatsSteps(
-                controller, track.id, samples, pattern, kit,
-                rowMin = 48.dp, rowMax = 72.dp,
-                onFirstStep = newPatternFromStep,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                // A small kit leaves room under its rows. Pads go there, so
+                // that space plays instead of sitting empty; the rows give
+                // up height to them down to a size a finger still hits.
+                val n = samples.size
+                val rowH = ((maxHeight - 1.dp - PADS_MIN - BeatsHeadH - Dimens.gap) / n).coerceAtMost(STEP_ROW_MAX)
+                val padsBelow = n <= 4 && rowH >= STEP_ROW_MIN_WITH_PADS
+                Column(Modifier.fillMaxSize()) {
+                    BeatsSteps(
+                        controller, track.id, samples, pattern, kit,
+                        rowMin = 48.dp, rowMax = STEP_ROW_MAX,
+                        onFirstStep = newPatternFromStep,
+                        modifier = if (padsBelow) Modifier.fillMaxWidth().height(BeatsHeadH + Dimens.gap + rowH * n)
+                        else Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    if (padsBelow) {
+                        Divider()
+                        BeatsPads(
+                            controller, track.id, samples, pattern, columns = n,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    }
+                }
+            }
         }
         Divider()
         Row(
@@ -353,18 +384,47 @@ private fun PreviewButton(playing: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Puts one clip of the pattern on the track at the bar at or after the
- *  playhead. Its own composable: the label follows the playhead. */
+/** Puts one clip of the pattern on the track at the first free bar from
+ *  the playhead on. Its own composable: the label follows the playhead. */
 @Composable
 private fun PlaceButton(controller: SongController, trackId: Int, pattern: Pattern, modifier: Modifier = Modifier) {
-    val bar = controller.nextBarIndex()
+    val bar = controller.freeBarFor(trackId, pattern)
     AppButton(
         "Place at bar ${bar + 1}",
-        onClick = { controller.placePatternAt(trackId, pattern.id, bar) },
+        onClick = {
+            val before = controller.song.track(trackId)?.clips?.size ?: 0
+            controller.placePatternAt(trackId, pattern.id, bar)
+            if ((controller.song.track(trackId)?.clips?.size ?: 0) > before) {
+                controller.message = "${pattern.name} placed at bar ${bar + 1}"
+            }
+        },
         modifier = modifier,
         accent = Colors.accent,
         filled = true,
     )
+}
+
+/**
+ * The 0-based bar at or after the playhead where one clip of [pattern] fits
+ * on the track without overlapping a clip already there. Placing twice in a
+ * row then puts the second clip after the first instead of on top of it,
+ * where every hit would play twice.
+ */
+private fun SongController.freeBarFor(trackId: Int, pattern: Pattern): Int {
+    val s = song
+    val clips = s.track(trackId)?.clips.orEmpty()
+    val length = s.framesOf(pattern.lengthTicks).coerceAtLeast(MIN_CLIP_FRAMES)
+    var bar = nextBarIndex()
+    while (true) {
+        val start = s.barStartFrame(bar)
+        val blocking = clips.filter { it.start < start + length && it.end > start }
+        if (blocking.isEmpty()) return bar
+        // On to the first bar that starts at or after the last overlap ends.
+        val end = blocking.maxOf { it.end }
+        var next = Math.floor(end / s.framesPerBar).toInt()
+        if (s.barStartFrame(next) < end) next++
+        bar = maxOf(next, bar + 1)
+    }
 }
 
 internal val BeatsLabelW: Dp = 64.dp

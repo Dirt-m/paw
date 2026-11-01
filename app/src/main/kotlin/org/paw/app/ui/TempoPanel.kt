@@ -75,7 +75,8 @@ internal fun TempoPanel(controller: SongController, ui: SongUi, compact: Boolean
                         maxLines = 1,
                     )
                     Text(
-                        "BPM · ${song.beatsPerBar}/${song.beatUnit}",
+                        // In /8 the number still counts quarters; say so.
+                    (if (song.beatUnit == 8) "BPM (♩) · " else "BPM · ") + "${song.beatsPerBar}/${song.beatUnit}",
                         style = LabelStyle.copy(fontSize = 12.sp),
                     )
                 }
@@ -127,7 +128,8 @@ internal fun TempoPanel(controller: SongController, ui: SongUi, compact: Boolean
                     listOf("Off", "On"),
                     selected = if (controller.clickEnabled) 1 else 0,
                     onSelect = { controller.setClick(it == 1) },
-                    accent = Colors.green,
+                    // Green says the click is running; a lit Off is only the choice.
+                    accent = if (controller.clickEnabled) Colors.green else Colors.accent,
                     modifier = Modifier.weight(1f),
                 )
             }

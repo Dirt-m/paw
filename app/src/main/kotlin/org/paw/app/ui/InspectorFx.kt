@@ -46,8 +46,12 @@ internal fun InspectorFxTab(controller: SongController, trackId: Int, modifier: 
             }, onCancel = { picking = false })
             return@PanelBody
         }
-        track.effects.forEachIndexed { index, _ ->
-            EffectCard(controller, trackId, index)
+        track.effects.forEachIndexed { index, effect ->
+            // Keyed so a card's slider state stays with its effect when the
+            // chain reorders or loses one.
+            androidx.compose.runtime.key(index, effect.pluginId) {
+                EffectCard(controller, trackId, index)
+            }
             VSpace(8.dp)
         }
         AppButton(
@@ -186,7 +190,6 @@ private fun ControlRow(
     label: String,
     value: Float,
     readout: String,
-    onStart: () -> Unit,
     onChange: (Float) -> Unit,
     onCommit: () -> Unit,
     onReset: () -> Unit,
@@ -203,7 +206,6 @@ private fun ControlRow(
         MiniSlider(
             value = value,
             accent = accent,
-            onStart = onStart,
             onChange = onChange,
             onCommit = onCommit,
             onReset = onReset,
@@ -229,18 +231,19 @@ private fun MixRow(controller: SongController, trackId: Int, index: Int, bypasse
         value = shown,
         readout = "%.0f%%".format(shown * 100),
         accent = Colors.green,
-        onStart = { controller.beginGesture() },
+        // The drag only previews; the song takes the value on release, as
+        // one undo step, and only when it moved.
         onChange = { pos ->
             live = pos
             controller.previewEffectMix(trackId, index, bypassed, pos)
         },
         onCommit = {
-            live?.let { controller.setEffectState(trackId, index, bypassed, it, undoable = false) }
+            live?.let { if (it != mix) controller.setEffectState(trackId, index, bypassed, it) }
             live = null
         },
         onReset = {
             live = null
-            controller.setEffectState(trackId, index, bypassed, 1f)
+            if (mix != 1f) controller.setEffectState(trackId, index, bypassed, 1f)
         },
     )
 }
@@ -260,19 +263,24 @@ private fun PortRow(
         label = label,
         value = live ?: portToPos(port, value),
         readout = formatPortValue(port, live?.let { posToPort(port, it) } ?: value, unit),
-        onStart = { controller.beginGesture() },
         onChange = { p ->
             live = p
             controller.previewEffectValue(trackId, index, portIndex, posToPort(port, p))
         },
         onCommit = {
-            live?.let { controller.setEffectValue(trackId, index, portIndex, posToPort(port, it)) }
+            // setEffectValue is no undo step itself: push one, only for a move.
+            live?.let { posToPort(port, it) }?.takeIf { it != value }?.let {
+                controller.beginGesture()
+                controller.setEffectValue(trackId, index, portIndex, it)
+            }
             live = null
         },
         onReset = {
             live = null
-            controller.beginGesture()
-            controller.setEffectValue(trackId, index, portIndex, port.def)
+            if (value != port.def) {
+                controller.beginGesture()
+                controller.setEffectValue(trackId, index, portIndex, port.def)
+            }
         },
     )
 }

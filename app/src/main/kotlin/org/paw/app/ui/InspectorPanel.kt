@@ -210,7 +210,7 @@ private fun LevelRows(controller: SongController, track: Track, withPan: Boolean
             formatDb(liveGain ?: track.gain),
             Modifier.width(72.dp),
             style = MonoStyle.copy(textAlign = TextAlign.End),
-            onReset = { controller.updateTrack(track.id) { it.copy(gain = 1f) } },
+            onReset = { if (track.gain != 1f) controller.updateTrack(track.id) { it.copy(gain = 1f) } },
         )
     }
     if (withPan) {
@@ -221,7 +221,7 @@ private fun LevelRows(controller: SongController, track: Track, withPan: Boolean
                 formatPan(livePan ?: track.pan),
                 Modifier.width(72.dp),
                 style = MonoStyle.copy(textAlign = TextAlign.End),
-                onReset = { controller.updateTrack(track.id) { it.copy(pan = 0f) } },
+                onReset = { if (track.pan != 0f) controller.updateTrack(track.id) { it.copy(pan = 0f) } },
             )
         }
     }
@@ -256,9 +256,8 @@ internal fun PanelLinkRow(label: String, detail: String, onClick: () -> Unit, mo
 @Composable
 private fun InputList(controller: SongController, ui: SongUi, track: Track) {
     val usbOptions = controller.inputOptions.filter { it.device.isUsb }
-    fun choose(device: InputDevice, mode: Int) {
-        controller.setInput(track.id, device, mode)
-    }
+    // setInput skips the current choice, so a tap on it is no undo step.
+    fun choose(device: InputDevice, mode: Int) = controller.setInput(track.id, device, mode)
     SectionLabel("Input", Modifier.padding(top = 4.dp, bottom = 4.dp))
     usbOptions.forEachIndexed { index, opt ->
         val onThis = track.inputDevice == opt.device ||

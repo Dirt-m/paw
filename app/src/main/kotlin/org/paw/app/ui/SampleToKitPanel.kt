@@ -23,10 +23,11 @@ import org.paw.app.SongController
 import org.paw.app.model.TRACK_BEAT
 
 // Turns the selected audio clip into a sample on a beat track: which kit it
-// joins, under what name. Beats mode opens on that kit afterwards, so the new
+// joins (the one Beats mode last showed, to begin with), under what name. Beats mode opens on that kit afterwards, so the new
 // sound is in view.
 
-/** The longest sample the controller keeps; it cuts the rest. */
+/** The longest sample the controller keeps; it cuts the rest. Must match
+ *  SongController's own limit, which is private to it. */
 private const val MAX_SAMPLE_SECONDS = 10L
 
 @Composable
@@ -39,7 +40,9 @@ internal fun SampleToKitPanel(controller: SongController, ui: SongUi, p: SongPan
     }
     val beatTracks = song.tracks.filter { it.kind == TRACK_BEAT }
     // null = a new beat track.
-    var target by remember(p) { mutableStateOf(beatTracks.firstOrNull()?.id) }
+    var target by remember(p) {
+        mutableStateOf(beatTracks.find { it.id == ui.beatsTrack }?.id ?: beatTracks.firstOrNull()?.id)
+    }
     var name by remember(p) { mutableStateOf("Sample ${song.nextSampleId}") }
     val maxFrames = MAX_SAMPLE_SECONDS * song.sampleRate
     val tooLong = clip.length > maxFrames

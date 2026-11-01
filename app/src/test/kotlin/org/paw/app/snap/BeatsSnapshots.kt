@@ -60,6 +60,47 @@ class BeatsSnapshots : SnapshotBase() {
         songWith(c, beatsUi()); click("Groove"); snap("beats-patterns-portrait")
     }
 
+    /** A placed pattern can't be deleted; its button says so. */
+    @Test fun beats_patterns_in_use_portrait() {
+        val c = controller()
+        c.placePatternAt(5, 1, 0)
+        c.message = null
+        songWith(c, beatsUi()); click("Groove"); snap("beats-patterns-in-use-portrait")
+    }
+
+    /** Two sounds: the rows grow and pads fill the space under them. */
+    @Test fun beats_two_portrait() {
+        val c = controller()
+        c.removeSample(5, c.song.track(5)!!.samples.last().id)
+        c.message = null
+        songWith(c, beatsUi()); snap("beats-two-portrait")
+    }
+
+    @Test fun beats_four_portrait() {
+        val c = controller()
+        c.sampleFromClip(3, 4, 5, "Clap")
+        c.message = null
+        songWith(c, beatsUi()); snap("beats-four-portrait")
+    }
+
+    @Test fun beats_five_portrait() {
+        val c = controller()
+        c.sampleFromClip(3, 4, 5, "Clap")
+        c.sampleFromClip(3, 4, 5, "Rim")
+        c.message = null
+        songWith(c, beatsUi()); snap("beats-five-portrait")
+    }
+
+    /** After placing, the button moves on to the next free bar. */
+    @Test fun beats_placed_portrait() {
+        songWith(controller(), beatsUi())
+        compose.onNodeWithText("Place at bar 6").performClick()
+        compose.waitForIdle()
+        // The next free bar is after the clip just placed, not on top of it.
+        compose.onNodeWithText("Place at bar 7").assertExists()
+        snap("beats-placed-portrait")
+    }
+
     @Test fun beats_no_track_portrait() {
         songWith(emptyController(app), SongUi(SongMode.Beats)); snap("beats-no-track-portrait")
     }

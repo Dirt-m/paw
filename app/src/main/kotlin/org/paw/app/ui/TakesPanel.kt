@@ -5,9 +5,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,16 +47,20 @@ import kotlinx.coroutines.withContext
 import org.paw.app.PeakData
 import org.paw.app.SongController
 import org.paw.app.TakeEntry
+import org.paw.app.model.Clip
 import org.paw.app.model.TRACK_AUDIO
+import org.paw.app.model.Track
 import org.paw.app.model.barBeatAt
 
 // Every recording in the song's folder, grouped per track, newest first, with
 // imports in their own group. Audition one, put it on a track at the playhead
-// or where it was first placed, or delete one nothing uses. The target track
-// is named on the button, so adding never lands somewhere unexpected.
+// or where it was first placed, jump to where it already plays, or delete one
+// nothing uses. The target track is named on the button, so adding never
+// lands somewhere unexpected.
 
-/** One per-track group of recordings, in song track order. */
-private data class TakeGroup(val title: String, val entries: List<TakeEntry>)
+/** One per-track group of recordings, in song track order. [key] is unique
+ *  even when two tracks share a name. */
+private data class TakeGroup(val key: String, val title: String, val entries: List<TakeEntry>)
 
 /** Files brought in from elsewhere, "import_<original name>.wav". */
 private const val IMPORT_PREFIX = "import_"
@@ -81,15 +88,15 @@ private fun grouped(controller: SongController, list: List<TakeEntry>): List<Tak
     for (track in controller.song.tracks) {
         val entries = byTrack[track.id] ?: continue
         claimed += track.id
-        groups += TakeGroup(track.name, entries)
+        groups += TakeGroup("t${track.id}", track.name, entries)
     }
     // Recordings whose track is gone keep their group, named after the id.
     for ((id, entries) in byTrack) {
         if (id == null || id in claimed) continue
-        groups += TakeGroup("Track $id (removed)", entries)
+        groups += TakeGroup("removed$id", "Track $id (removed)", entries)
     }
-    if (imported.isNotEmpty()) groups += TakeGroup("Imported", imported)
-    byTrack[null]?.let { groups += TakeGroup("Other files", it) }
+    if (imported.isNotEmpty()) groups += TakeGroup("import", "Imported", imported)
+    byTrack[null]?.let { groups += TakeGroup("other", "Other files", it) }
     return groups.map { g -> g.copy(entries = g.entries.sortedByDescending { createdAt(it) }) }
 }
 
@@ -133,10 +140,14 @@ internal fun TakesPanel(controller: SongController, ui: SongUi, modifier: Modifi
         controller.importRecordings(uris)
     }
 
-    // The selected audio track, else the first one: shown on every Add.
+    // A take goes back to its own track by default, else to the selected
+    // audio track, else the first one; each row can pick another.
     val song = controller.song
-    val target = song.tracks.find { it.id == controller.selectedTrack && it.kind == TRACK_AUDIO }
-        ?: song.tracks.firstOrNull { it.kind == TRACK_AUDIO }
+    val audioTracks = song.tracks.filter { it.kind == TRACK_AUDIO }
+    val fallback = audioTracks.find { it.id == controller.selectedTrack } ?: audioTracks.firstOrNull()
+    // A take being written has no clip yet and reads as unused: no deleting
+    // anything until the recording stops.
+    val recording = controller.status.recording || controller.status.recPending
     val at by remember(controller) {
         derivedStateOf { controller.song.barBeatAt(controller.playheadFrame).let { "${it.bar}.${it.beat}" } }
     }
@@ -170,19 +181,26 @@ internal fun TakesPanel(controller: SongController, ui: SongUi, modifier: Modifi
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
             ) {
                 groups.forEach { group ->
-                    item(key = "header-${group.title}") {
+                    item(key = "header-${group.key}") {
                         SectionLabel(group.title, Modifier.padding(top = 14.dp, bottom = 6.dp))
                     }
                     items(group.entries.size, key = { group.entries[it].rel }) { i ->
+                        val entry = group.entries[i]
+                        val own = TRACK_SUFFIX.find(entry.name)?.groupValues?.get(1)?.toIntOrNull()
                         TakeRow(
-                            entry = group.entries[i],
+                            entry = entry,
                             controller = controller,
-                            playing = auditioning == group.entries[i].rel,
-                            targetName = target?.name,
+                            playing = auditioning == entry.rel,
+                            tracks = audioTracks,
+                            defaultTarget = audioTracks.find { it.id == own } ?: fallback,
+                            deletable = !recording,
                             at = at,
                             onAudition = { toggleAudition(it) },
-                            onAdd = { frame ->
-                                target?.let { controller.addTakeToTrack(it.id, group.entries[i].rel, frame) }
+                            onJump = { trackId, clip ->
+                                controller.seek(clip.start)
+                                controller.selectedTrack = trackId
+                                controller.selectedClip = trackId to clip.id
+                                ui.close()
                             },
                             onDeleted = { reloadKey++ },
                         )
@@ -193,20 +211,31 @@ internal fun TakesPanel(controller: SongController, ui: SongUi, modifier: Modifi
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TakeRow(
     entry: TakeEntry,
     controller: SongController,
     playing: Boolean,
-    targetName: String?,
+    tracks: List<Track>,
+    defaultTarget: Track?,
+    deletable: Boolean,
     at: String,
     onAudition: (TakeEntry) -> Unit,
-    onAdd: (Long) -> Unit,
+    onJump: (trackId: Int, clip: Clip) -> Unit,
     onDeleted: () -> Unit,
 ) {
     var confirmingDelete by remember(entry.rel) { mutableStateOf(false) }
-    val sr = controller.song.sampleRate
+    var choosing by remember(entry.rel) { mutableStateOf(false) }
+    var chosen by remember(entry.rel) { mutableStateOf<Int?>(null) }
+    val target = tracks.find { it.id == chosen } ?: defaultTarget
+    val song = controller.song
+    val sr = song.sampleRate
     val original = controller.originalStartOf(entry.rel)
+    // Where the take first plays on the timeline, for the jump.
+    val placed = song.tracks
+        .flatMap { t -> t.clips.filter { it.take == entry.rel }.map { t.id to it } }
+        .minByOrNull { it.second.start }
 
     Column(Modifier.fillMaxWidth().panel().padding(8.dp)) {
         Row(
@@ -222,7 +251,13 @@ private fun TakeRow(
                 onClick = { onAudition(entry) },
                 size = 44.dp,
             )
-            Column(Modifier.width(132.dp)) {
+            Column(
+                Modifier
+                    .width(148.dp)
+                    .heightIn(min = 44.dp)
+                    .then(if (placed != null) Modifier.clickable { onJump(placed.first, placed.second) } else Modifier),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         formatShortTime(entry.frames, sr),
@@ -235,24 +270,28 @@ private fun TakeRow(
                         maxLines = 1,
                     )
                 }
-                Text(
-                    when (entry.usedBy) {
-                        0 -> "Unused"
-                        1 -> "On timeline"
-                        else -> "On timeline ×${entry.usedBy}"
-                    },
-                    style = LabelStyle.copy(color = if (entry.usedBy > 0) Colors.green else Colors.dim),
-                    maxLines = 1,
-                )
+                if (placed == null) {
+                    // usedBy also counts kit samples cut from the take.
+                    Text(if (entry.usedBy > 0) "In a kit" else "Unused", style = DimStyle.copy(fontSize = 12.sp), maxLines = 1)
+                } else {
+                    val bb = song.barBeatAt(placed.second.start)
+                    Text(
+                        (if (entry.usedBy > 1) "×${entry.usedBy}, first at " else "On timeline at ") +
+                            "${bb.bar}.${bb.beat} ›",
+                        style = DimStyle.copy(fontSize = 12.sp, color = Colors.green),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             TakeWave(controller, entry.rel, 0L, entry.frames, Modifier.weight(1f).height(36.dp))
-            if (entry.usedBy == 0) {
+            if (entry.usedBy == 0 && deletable) {
                 IconButton(CloseGlyph, tint = Colors.red, onClick = { confirmingDelete = true })
             }
         }
         VSpace(8.dp)
-        if (confirmingDelete) {
-            ConfirmRow(
+        when {
+            confirmingDelete && deletable -> ConfirmRow(
                 question = "Delete from disk?",
                 confirmLabel = "Delete",
                 onConfirm = {
@@ -261,23 +300,47 @@ private fun TakeRow(
                 },
                 onCancel = { confirmingDelete = false },
             )
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AppButton(
-                    if (targetName == null) "No audio track" else "Add to ${shortName(targetName)} at $at",
-                    enabled = targetName != null,
-                    accent = Colors.accent,
-                    padding = 8.dp,
-                    onClick = { onAdd(controller.playheadFrame) },
-                    modifier = Modifier.weight(1f),
-                )
+            choosing -> FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (t in tracks) {
+                    Toggle(shortName(t.name), t.id == target?.id, Colors.accent, onClick = {
+                        chosen = t.id
+                        choosing = false
+                    })
+                }
+            }
+            else -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // The add and its track chooser read as one split button.
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    AppButton(
+                        if (target == null) "No audio track" else "Add to ${shortName(target.name)} at $at",
+                        enabled = target != null,
+                        accent = Colors.accent,
+                        padding = 8.dp,
+                        onClick = { target?.let { controller.addTakeToTrack(it.id, entry.rel, controller.playheadFrame) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (tracks.size > 1) {
+                        AppButton(
+                            "▾",
+                            accent = Colors.accent,
+                            padding = 0.dp,
+                            fontSize = 16.sp,
+                            onClick = { choosing = true },
+                            modifier = Modifier.width(40.dp),
+                        )
+                    }
+                }
                 if (original != null) {
                     AppButton(
                         "At original time",
-                        enabled = targetName != null,
+                        enabled = target != null,
                         accent = Colors.text,
                         padding = 10.dp,
-                        onClick = { onAdd(original) },
+                        onClick = { target?.let { controller.addTakeToTrack(it.id, entry.rel, original) } },
                     )
                 }
             }
