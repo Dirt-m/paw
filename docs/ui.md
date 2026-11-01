@@ -52,20 +52,23 @@ and only then leaves the song.
 
 The ruler block sits over the lanes. Its corner holds Fit (show the whole song) and
 Snap (Bar, Beat or Off, tap to cycle); − and + zoom around the playhead. Above the
-ruler in portrait, the overview strip draws the whole song with a frame around the part
+ruler in portrait (landscape gives that height to the lanes), the overview strip draws the whole song with a frame around the part
 on screen; touch or drag it to move there. The ruler counts bars from the song's tempo
 and meter, with beats as ticks when there is room, and minutes and seconds when the
 clock is switched to time. Tap the ruler to seek. The loop is a green band with a tab
 at each end; drag a tab to resize, hold and drag anywhere to paint a new one, and the
 ✕ beside it clears it. Loop edges snap.
 
-Each lane has a header, 116 dp wide in portrait. The name opens the track's inspector;
-beside it, an audio track shows its input (DUO 1, DUO 1+2, MIC, NO INPUT), which opens
-the inspector at the input list. Under them, four 40 dp toggles: arm, monitor, mute and
-solo, and a level meter down the right edge. A beat track's header has its name, how
+Each lane has a header, 128 dp wide in portrait, with room for a name on two lines. The
+name opens the track's inspector; beside it, an audio track's input button shows the
+channel (1, 2, 1+2, MIC, OFF; the device is on the top bar) and opens the inspector at
+the input list. Under them, four 40 dp toggles: arm, monitor, mute and solo, and a
+level meter down the right edge. In landscape the input button and the four toggles
+make one row under the name. A beat track's header has its name, how
 many sounds its kit holds, mute and solo. Tapping anywhere else on a header, or on
 empty lane space, selects the track, which is what Beats, Takes and new samples act on.
-The add row (+ Audio, + Beat, Takes) stays pinned under the lanes.
+The add row (+ Audio, + Beat, Takes) stays pinned under the lanes, under the headers
+in landscape.
 
 Clips: tap to select, drag the body to move, the lower edges to trim, the top corners
 to fade. Moving an audio clip snaps the distance it moves, so the take stays in time
@@ -166,7 +169,7 @@ read only Audio block, the songs folder and the effects folder.
   read as workspace.
 - Lilac is the accent: the selected thing and the primary action. Green means an
   active mode (solo, loop, click, monitoring, an open input). Red means recording,
-  clipping or removal. Yellow means mute and warnings.
+  clipping or removal. Yellow means mute and warnings. Messages are neutral.
 - Words are set in the system sans; numbers that change under the eye (the clock, dB,
   times) are monospace so they do not jitter.
 - Panels, pickers and confirmations are drawn in the layout, never as popups.

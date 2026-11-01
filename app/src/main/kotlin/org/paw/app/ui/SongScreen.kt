@@ -42,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
@@ -196,7 +198,12 @@ fun SongScreen(
                     if (panel != null && compact) {
                         PanelHost(controller, ui, tl, compact, Modifier.fillMaxSize().blockTouches())
                     }
-                    MessageBanner(controller, Modifier.align(Alignment.BottomCenter).padding(12.dp))
+                    // Tracks pins its add row along the bottom; the banner sits above it.
+                    MessageBanner(
+                        controller,
+                        Modifier.align(Alignment.BottomCenter)
+                            .padding(start = 12.dp, end = 12.dp, bottom = if (ui.mode == SongMode.Tracks) 64.dp else 12.dp),
+                    )
                 }
                 if (panel != null && !compact) {
                     Box(Modifier.width(1.dp).fillMaxHeight().background(Colors.line))
@@ -216,6 +223,20 @@ fun SongScreen(
     }
 }
 
+/** A quarter arc going round the share button while a mixdown renders. */
+@Composable
+private fun ExportSpinner() {
+    val turn = androidx.compose.animation.core.rememberInfiniteTransition(label = "export")
+    val angle by turn.animateFloat(
+        0f, 360f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)),
+        label = "export",
+    )
+    Canvas(Modifier.size(30.dp)) {
+        drawArc(Colors.accent, angle, 100f, useCenter = false, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+    }
+}
+
 /** Swallows whatever the content above it leaves, so nothing falls through. */
 private fun Modifier.blockTouches(): Modifier = pointerInput(Unit) {
     awaitPointerEventScope {
@@ -229,7 +250,14 @@ private fun Modifier.blockTouches(): Modifier = pointerInput(Unit) {
 /** Tracks · Mix · Beats, the three places a song is worked on. */
 @Composable
 internal fun ModeBar(ui: SongUi, modifier: Modifier = Modifier, height: Dp = 48.dp) {
-    Row(modifier.height(height).background(Colors.panel)) {
+    // A hairline on top keeps the lit mode's bar off whatever sits above.
+    Row(
+        modifier
+            .height(height)
+            .background(Colors.panel)
+            .drawBehind { drawLine(Colors.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
+            .padding(top = 2.dp),
+    ) {
         for (m in SongMode.entries) {
             val on = ui.mode == m
             Box(
@@ -334,9 +362,7 @@ private fun SongTopBar(
                     onClick = { scope.launch { controller.exportMixdown() } },
                 )
                 // Export runs for a while on a long song; the button itself says so.
-                if (controller.exporting) {
-                    Box(Modifier.size(28.dp).border(2.dp, Colors.accent, CircleShape))
-                }
+                if (controller.exporting) ExportSpinner()
             }
             Box {
                 IconButton(MoreGlyph, onClick = { menuOpen = true })

@@ -114,6 +114,14 @@ abstract class SnapshotBase {
 
     protected fun controller() = demoController(ApplicationProvider.getApplicationContext())
 
+    /** Prefs are a process singleton; a zoom one test saved must not reach the next. */
+    @org.junit.Before
+    fun freshPrefs() {
+        val f = org.paw.app.AppPrefs::class.java.getDeclaredField("instance")
+        f.isAccessible = true
+        f.set(null, null)
+    }
+
     protected val app: android.content.Context
         get() = ApplicationProvider.getApplicationContext()
 
