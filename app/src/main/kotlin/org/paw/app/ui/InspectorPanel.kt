@@ -330,9 +330,9 @@ private fun RenameRow(controller: SongController, track: Track) {
         }
     }
 }
+
 /** Last in the panel and quiet until asked. Undo brings the track back,
  *  but it still asks first: a track can hold a lot of work. */
- *  it still asks, because a track can hold a lot of work. */
 @Composable
 private fun RemoveRow(controller: SongController, ui: SongUi, track: Track) {
     var confirming by remember(track.id) { mutableStateOf(false) }
