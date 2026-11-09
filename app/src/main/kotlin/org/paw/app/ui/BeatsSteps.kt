@@ -77,7 +77,11 @@ internal fun BeatsSteps(
         val n = samples.size.coerceAtLeast(1)
         val rowH = ((maxHeight - BeatsHeadH - Dimens.gap) / n).coerceIn(rowMin, rowMax)
         if (kit) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = BeatsHeadH)) {
+            val kitScroll = rememberScrollState()
+            Column(
+                Modifier.fillMaxWidth().scrollCues(kitScroll, vertical = true)
+                    .verticalScroll(kitScroll).padding(top = BeatsHeadH),
+            ) {
                 for (s in samples) {
                     androidx.compose.runtime.key(s.id) { KitRow(controller, trackId, s, rowH) }
                 }
@@ -94,13 +98,17 @@ internal fun BeatsSteps(
                 Box(Modifier.width(BeatsLabelW + Dimens.gap * 3 / 2))
                 Box(Modifier.weight(1f).horizontalScroll(hScroll)) { BeatNumbers(p, cellW) }
             }
-            Row(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            val vScroll = rememberScrollState()
+            Row(Modifier.fillMaxWidth().scrollCues(vScroll, vertical = true).verticalScroll(vScroll)) {
                 Column(Modifier.padding(start = Dimens.gap, end = Dimens.gap / 2)) {
                     for (s in samples) {
                         AuditionLabel(s.name, rowH) { controller.triggerSample(trackId, s.id) }
                     }
                 }
-                Box(Modifier.weight(1f).horizontalScroll(hScroll).padding(end = Dimens.gap)) {
+                Box(
+                    Modifier.weight(1f).scrollCues(hScroll, vertical = false)
+                        .horizontalScroll(hScroll).padding(end = Dimens.gap),
+                ) {
                     StepCells(controller, samples, p, real = pattern != null, cellW, rowH, onFirstStep)
                 }
             }

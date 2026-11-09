@@ -119,7 +119,7 @@ class SongController(
     private var scope: CoroutineScope? = null
     private val prefs = AppPrefs.of(context)
 
-    var song: Song by mutableStateOf(initial)
+    var song: Song by mutableStateOf(initial.withoutStackedPatterns())
         private set
 
     // Engine state is split by how fast it moves, so a meter twitch can't
@@ -418,7 +418,6 @@ class SongController(
         // from deleted takes.
         Engine.openSong(gen)
         syncAllToEngine()
-        syncSampler()
         syncMetronome()
         syncLoop()
         // The controller's own scope, so everything launched here dies with
@@ -426,6 +425,12 @@ class SongController(
         // can't take the poll down with it.
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         this.scope = scope
+        // openSong emptied the engine's sample bank, so whatever was pushed
+        // before (by an earlier start of this same song) is gone. The sampler
+        // loads on this scope, so it has to exist first.
+        syncedBank = null
+        syncedHitsKey = null
+        syncSampler()
         scope.launch {
             while (isActive) {
                 pollEngine()
@@ -1260,6 +1265,9 @@ class SongController(
     /** Pushes the bank when the set of slices changed, then the hits and the
      *  preview when anything they depend on changed. */
     private fun syncSampler() {
+        // Nothing is pushed without a scope, so nothing may be marked pushed:
+        // start() syncs again once it has one.
+        val scope = scope ?: return
         val s = song
         // An undo can take away the pattern that is looping.
         previewing?.let { if (s.pattern(it) == null) stopPreview() }
@@ -1273,7 +1281,6 @@ class SongController(
         val hits = hitsOf(s, bank)
         val preview = previewing?.let { previewArrays(s, it, previewTrack, bank) }
         val previewLen = previewing?.let { id -> s.pattern(id)?.let { s.framesOf(it.lengthTicks) } } ?: 0L
-        val scope = scope ?: return
         scope.launch(samplerIo) {
             if (loadBank) {
                 val loaded = Engine.setSamples(
@@ -1458,6 +1465,30 @@ class SongController(
         return if (song.barStartFrame(i) < playheadFrame) i + 1 else i
     }
 
+    /**
+     * The 0-based bar at or after the playhead where one clip of [patternId]
+     * fits on [trackId] without overlapping a clip already there. Placing
+     * twice in a row then puts the second clip after the first instead of on
+     * top of it, where every hit would play twice.
+     */
+    fun freeBarFor(trackId: Int, patternId: Int): Int {
+        val s = song
+        val clips = s.track(trackId)?.clips.orEmpty()
+        val p = s.pattern(patternId) ?: return nextBarIndex()
+        val length = s.framesOf(p.lengthTicks).coerceAtLeast(MIN_CLIP_FRAMES)
+        var bar = nextBarIndex()
+        while (true) {
+            val start = s.barStartFrame(bar)
+            val blocking = clips.filter { it.start < start + length && it.end > start }
+            if (blocking.isEmpty()) return bar
+            // On to the first bar that starts at or after the last overlap ends.
+            val end = blocking.maxOf { it.end }
+            var next = Math.floor(end / s.framesPerBar).toInt()
+            if (s.barStartFrame(next) < end) next++
+            bar = maxOf(next, bar + 1)
+        }
+    }
+
     /** Puts a clip of [patternId], one pattern long, on [trackId] at the
      *  0-based song bar [barIndex]. The pattern must belong to the track. */
     fun placePatternAt(trackId: Int, patternId: Int, barIndex: Int) =
@@ -1482,9 +1513,9 @@ class SongController(
     }
 
     /** Puts a clip of [patternId] on [trackId], one pattern long, at the
-     *  song bar at or after the playhead. */
+     *  first free bar at or after the playhead. */
     fun placePattern(trackId: Int, patternId: Int, undoable: Boolean = true) =
-        placePatternAt(trackId, patternId, nextBarIndex(), undoable)
+        placePatternAt(trackId, patternId, freeBarFor(trackId, patternId), undoable)
 
     /** Makes the pattern clip [clipId] play [patternId] instead, keeping its
      *  place and length. The pattern must belong to the track. Undoable. */

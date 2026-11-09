@@ -2,6 +2,7 @@ package org.paw.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -35,12 +36,15 @@ import org.paw.app.model.Track
 import org.paw.app.model.barBeatAt
 import org.paw.app.model.snapFrame
 
-// Actions for the selected clip. The bar takes the mode bar's place while a
-// clip is selected (the top bar's middle in landscape), so it is one row the
-// width of the screen; More, the pattern list and the takes under a clip swap
-// into the same place instead of opening anything over the song.
+// Actions for the selected clip, over the transport while a clip is selected.
+// Every action is on show at once: one row when the window is wide, two on a
+// phone held upright. The pattern list and the takes under a clip swap into
+// the same place instead of opening anything over the song.
 
-private enum class ClipPage { Main, More, Patterns, Takes }
+private enum class ClipPage { Main, Patterns, Takes }
+
+/** Narrower than this, the actions take two rows. */
+private val ONE_ROW_W = 600.dp
 
 @Composable
 internal fun ClipBar(
@@ -58,30 +62,73 @@ internal fun ClipBar(
     var page by remember(sel) { mutableStateOf(ClipPage.Main) }
     val rowH = if (compact) 48.dp else 44.dp
 
-    Column(
+    BoxWithConstraints(
         modifier
             .background(Colors.panel)
             .background(Colors.accent.copy(alpha = 0.07f))
             .drawBehind { drawLine(Colors.accent.copy(alpha = 0.6f), Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) },
     ) {
+        val oneRow = maxWidth >= ONE_ROW_W
         when (page) {
-            ClipPage.Main -> BarRow(rowH) {
-                IconButton(CloseGlyph, onClick = { controller.selectedClip = null }, tint = Colors.dim)
-                if (clip.isPattern) {
-                    PatternMain(controller, ui, track, clip) { page = it }
-                } else {
-                    SplitButton(controller, ui, track.id, clip, Modifier.weight(1f))
-                    AppButton("Duplicate", onClick = { controller.duplicateClip(trackId, clipId) },
-                        modifier = Modifier.weight(1.4f), fontSize = 12.sp, padding = 6.dp)
-                    AppButton("Delete", accent = Colors.red, onClick = { controller.deleteClip(trackId, clipId) },
-                        modifier = Modifier.weight(1.1f), fontSize = 12.sp, padding = 6.dp)
+            ClipPage.Main -> {
+                // The clip's own actions first, then the ones that move it or
+                // act around it.
+                val first: @Composable RowScope.() -> Unit = {
+                    IconButton(CloseGlyph, onClick = { controller.selectedClip = null }, tint = Colors.dim)
+                    if (clip.isPattern) PatternMain(controller, ui, track, clip) { page = it }
+                    else EditActions(controller, ui, track, clip)
                 }
-                MoreButton { page = ClipPage.More }
+                val second: @Composable RowScope.() -> Unit = {
+                    if (clip.isPattern) EditActions(controller, ui, track, clip)
+                    else AppButton("Sample to kit", accent = Colors.accent, fontSize = 12.sp, padding = 6.dp,
+                        modifier = Modifier.weight(1.5f),
+                        onClick = { ui.open(SongPanel.SampleToKit(track.id, clip.id)) })
+                    PlaceActions(controller, track, clip) { page = it }
+                }
+                if (oneRow) {
+                    BarRow(rowH) { first(); second() }
+                } else {
+                    Column(Modifier.padding(bottom = 4.dp)) {
+                        BarRow(rowH, content = first)
+                        BarRow(rowH, content = second)
+                    }
+                }
             }
-            ClipPage.More -> MorePage(controller, ui, track, clip, rowH) { page = it }
             ClipPage.Patterns -> PatternsPage(controller, track, clip, rowH) { page = it }
             ClipPage.Takes -> TakesPage(controller, ui, track, clip, compact, rowH) { page = it }
         }
+    }
+}
+
+/** Split, Duplicate and Delete. */
+@Composable
+private fun RowScope.EditActions(controller: SongController, ui: SongUi, track: Track, clip: Clip) {
+    SplitButton(controller, ui, track.id, clip, Modifier.weight(1f))
+    AppButton("Duplicate", onClick = { controller.duplicateClip(track.id, clip.id) },
+        modifier = Modifier.weight(1.4f), fontSize = 12.sp, padding = 4.dp)
+    AppButton("Delete", accent = Colors.red, onClick = { controller.deleteClip(track.id, clip.id) },
+        modifier = Modifier.weight(1.1f), fontSize = 12.sp, padding = 4.dp)
+}
+
+/** Loop over the clip, move it a track up or down, and the takes under it. */
+@Composable
+private fun RowScope.PlaceActions(controller: SongController, track: Track, clip: Clip, go: (ClipPage) -> Unit) {
+    val song = controller.song
+    val idx = song.tracks.indexOfFirst { it.id == track.id }
+    // A clip only moves to a neighbour that holds its kind.
+    fun canMoveTo(i: Int) = song.tracks.getOrNull(i)?.kind == track.kind
+    val under = controller.clipsUnder(track.id, clip.id)
+    AppButton("Loop clip", fontSize = 12.sp, padding = 4.dp, modifier = Modifier.weight(1.3f),
+        onClick = { controller.setLoopRegion(clip.start, clip.end) })
+    AppButton("▲", enabled = canMoveTo(idx - 1), fontSize = 12.sp, padding = 0.dp,
+        modifier = Modifier.width(Dimens.touch).semantics { contentDescription = "Move up a track" },
+        onClick = { controller.moveClipToTrack(track.id, clip.id, -1) })
+    AppButton("▼", enabled = canMoveTo(idx + 1), fontSize = 12.sp, padding = 0.dp,
+        modifier = Modifier.width(Dimens.touch).semantics { contentDescription = "Move down a track" },
+        onClick = { controller.moveClipToTrack(track.id, clip.id, 1) })
+    if (under.isNotEmpty()) {
+        AppButton("Takes ${under.size}", fontSize = 12.sp, padding = 4.dp, modifier = Modifier.weight(1.2f),
+            onClick = { go(ClipPage.Takes) })
     }
 }
 
@@ -93,11 +140,6 @@ private fun BarRow(height: Dp, content: @Composable RowScope.() -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         content = content,
     )
-}
-
-@Composable
-private fun MoreButton(onClick: () -> Unit) {
-    IconButton(MoreGlyph, onClick = onClick, modifier = Modifier.semantics { contentDescription = "More" })
 }
 
 @Composable
@@ -156,55 +198,13 @@ private fun RowScope.PatternMain(
     AppButton("Edit", onClick = { ui.openBeats(track.id, clip.pattern) }, fontSize = 12.sp, padding = 10.dp)
 }
 
-/**
- * The rarer actions, in the same one-row slot as the main page: the row
- * scrolls sideways rather than growing, so the lanes above never move.
- */
-@Composable
-private fun MorePage(
-    controller: SongController,
-    ui: SongUi,
-    track: Track,
-    clip: Clip,
-    rowH: Dp,
-    go: (ClipPage) -> Unit,
-) {
-    val song = controller.song
-    val idx = song.tracks.indexOfFirst { it.id == track.id }
-    // A clip only moves to a neighbour that holds its kind.
-    fun canMoveTo(i: Int) = song.tracks.getOrNull(i)?.kind == track.kind
-    val under = controller.clipsUnder(track.id, clip.id)
-    Row(
-        Modifier.fillMaxWidth().height(rowH).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        PageBack { go(ClipPage.Main) }
-        if (clip.isPattern) {
-            SplitButton(controller, ui, track.id, clip, Modifier)
-            AppButton("Duplicate", onClick = { controller.duplicateClip(track.id, clip.id) }, fontSize = 12.sp, padding = 10.dp)
-            AppButton("Delete", accent = Colors.red, onClick = { controller.deleteClip(track.id, clip.id) },
-                fontSize = 12.sp, padding = 10.dp)
-        } else {
-            AppButton("Sample to kit", accent = Colors.accent, fontSize = 12.sp, padding = 10.dp,
-                onClick = { ui.open(SongPanel.SampleToKit(track.id, clip.id)) })
-        }
-        AppButton("Loop clip", fontSize = 12.sp, padding = 10.dp, onClick = { controller.setLoopRegion(clip.start, clip.end) })
-        AppButton("Move ▲", enabled = canMoveTo(idx - 1), fontSize = 12.sp, padding = 10.dp,
-            onClick = { controller.moveClipToTrack(track.id, clip.id, -1) })
-        AppButton("Move ▼", enabled = canMoveTo(idx + 1), fontSize = 12.sp, padding = 10.dp,
-            onClick = { controller.moveClipToTrack(track.id, clip.id, 1) })
-        if (under.isNotEmpty()) {
-            AppButton("Takes ${under.size}", fontSize = 12.sp, padding = 10.dp, onClick = { go(ClipPage.Takes) })
-        }
-    }
-}
-
 /** The track's patterns to swap in, and a fresh copy for this clip alone. */
 @Composable
 private fun PatternsPage(controller: SongController, track: Track, clip: Clip, rowH: Dp, go: (ClipPage) -> Unit) {
+    val scroll = rememberScrollState()
     Row(
-        Modifier.fillMaxWidth().height(rowH).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+        Modifier.fillMaxWidth().height(rowH).scrollCues(scroll, vertical = false, color = Colors.panel)
+            .horizontalScroll(scroll).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

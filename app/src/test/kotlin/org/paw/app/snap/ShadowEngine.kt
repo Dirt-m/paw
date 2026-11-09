@@ -52,8 +52,12 @@ class ShadowEngine {
 
         /** The last setMetronome call's (bpm, beatsPerBar). */
         var metronome: Pair<Float, Int>? = null
+        /** Samples in the last bank pushed, or -1 when none was. Written
+         *  from the sampler's thread. */
+        @Volatile var bankSize: Int = -1
 
         fun reset() {
+            bankSize = -1
             transport = 0
             playheadFrame = 0L
             recording = false
@@ -150,8 +154,10 @@ class ShadowEngine {
     }
 
     @Implementation
-    fun setSamples(gen: Long, trackIds: IntArray, paths: Array<String>, srcStarts: LongArray, lengths: LongArray): Int =
-        paths.size
+    fun setSamples(gen: Long, trackIds: IntArray, paths: Array<String>, srcStarts: LongArray, lengths: LongArray): Int {
+        bankSize = paths.size
+        return paths.size
+    }
 
     @Implementation
     fun triggerSample(index: Int, velocity: Float) {

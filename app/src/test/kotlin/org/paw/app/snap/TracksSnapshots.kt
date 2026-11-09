@@ -1,6 +1,5 @@
 package org.paw.app.snap
 
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.semantics.SemanticsActions
@@ -20,7 +19,7 @@ class TracksSnapshots : SnapshotBase() {
     @Test @Config(qualifiers = "+land")
     fun song_landscape() { songWith(controller()); snap("song-landscape") }
 
-    /** Guitar's first clip selected: the clip bar in the mode bar's place. */
+    /** Guitar's first clip selected: the clip bar over the transport. */
     @Test fun song_selected_portrait() {
         val c = controller(); c.selectedClip = 1 to 1; c.selectedTrack = 1
         songWith(c); snap("song-selected-portrait")
@@ -52,34 +51,24 @@ class TracksSnapshots : SnapshotBase() {
         snap("song-pattern-chooser-portrait")
     }
 
-    /** More on an audio clip: the rarer actions in the same one-row slot. */
-    @Test fun song_clip_more_portrait() {
+    /** An audio clip with takes under it: every action at once, two rows. */
+    @Test fun song_clip_stacked_portrait() {
         val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
         songWith(c)
-        compose.onNodeWithContentDescription("More").performClick()
-        snap("song-clip-more-portrait")
-    }
-
-    @Test fun song_pattern_more_portrait() {
-        val c = controller(); c.selectedClip = 5 to 5; c.selectedTrack = 5
-        songWith(c); showBeatLane()
-        compose.onNodeWithContentDescription("More").performClick()
-        snap("song-pattern-more-portrait")
+        snap("song-clip-stacked-portrait")
     }
 
     @Test @Config(qualifiers = "+land")
-    fun song_clip_more_landscape() {
+    fun song_clip_stacked_landscape() {
         val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
         songWith(c)
-        compose.onNodeWithContentDescription("More").performClick()
-        snap("song-clip-more-landscape")
+        snap("song-clip-stacked-landscape")
     }
 
-    /** The older takes under a newer one, from More. */
+    /** The older takes under a newer one, from the clip bar. */
     @Test fun song_clip_takes_portrait() {
         val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
         songWith(c)
-        compose.onNodeWithContentDescription("More").performClick()
         compose.onNodeWithText("Takes 2").performClick()
         snap("song-clip-takes-portrait")
     }
@@ -88,7 +77,6 @@ class TracksSnapshots : SnapshotBase() {
     fun song_clip_takes_landscape() {
         val c = stackedController(); c.selectedClip = 1 to c.song.track(1)!!.clips.last().id
         songWith(c)
-        compose.onNodeWithContentDescription("More").performClick()
         compose.onNodeWithText("Takes 2").performClick()
         snap("song-clip-takes-landscape")
     }
