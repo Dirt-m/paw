@@ -81,8 +81,8 @@ import org.paw.app.model.Track
 // most one panel opens over it: over the whole workspace in portrait, as a
 // column on the right when the window is wide. The transport stays at the
 // bottom through all of it, so nothing a musician opens stops the song or
-// hides the playhead. The mode bar sits above the transport in thumb reach;
-// while a clip is selected the clip's actions take its place.
+// hides the playhead. The mode tabs sit under the top bar; while a clip is
+// selected its actions sit over the transport.
 
 
 /** Fit never zooms in closer than this, so a short song still has room. */
@@ -160,15 +160,19 @@ fun SongScreen(
     }
 
     // Back unwinds the screen one layer at a time before it leaves the song:
-    // the panel, then the clip selection, then back to Tracks.
+    // the panel, then the clip selection, then back to Tracks. The top bar's
+    // back button and the system back take the same steps.
     val clipSelected = controller.selectedClip != null && ui.mode == SongMode.Tracks
-    BackHandler(enabled = ui.panel != null || clipSelected || ui.mode != SongMode.Tracks) {
+    val canStepBack = ui.panel != null || clipSelected || ui.mode != SongMode.Tracks
+    val stepBack: () -> Unit = {
         when {
             ui.panel != null -> ui.close()
             clipSelected -> controller.selectedClip = null
-            else -> ui.mode = SongMode.Tracks
+            ui.mode != SongMode.Tracks -> ui.mode = SongMode.Tracks
+            else -> onBack()
         }
     }
+    BackHandler(enabled = canStepBack, onBack = stepBack)
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Colors.bg)) {
         val compact = maxWidth < COMPACT_WIDTH
@@ -176,7 +180,9 @@ fun SongScreen(
         val panel = ui.panel
 
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            SongTopBar(controller, ui, tl, onBack, onOpenSettings, onRename, compact = compact, short = short)
+            SongTopBar(controller, ui, stepBack, onOpenSettings, onRename, short = short)
+            // A short window keeps the tabs in the top bar, so the lanes keep their height.
+            if (!short) ModeBar(ui, Modifier.fillMaxWidth())
 
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -198,11 +204,9 @@ fun SongScreen(
                     if (panel != null && compact) {
                         PanelHost(controller, ui, tl, compact, Modifier.fillMaxSize().blockTouches())
                     }
-                    // Tracks pins its add row along the bottom; the banner sits above it.
                     MessageBanner(
                         controller,
-                        Modifier.align(Alignment.BottomCenter)
-                            .padding(start = 12.dp, end = 12.dp, bottom = if (ui.mode == SongMode.Tracks) 64.dp else 12.dp),
+                        Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                     )
                 }
                 if (panel != null && !compact) {
@@ -211,12 +215,9 @@ fun SongScreen(
                 }
             }
 
-            // In a short window the modes and clip actions live in the top
-            // bar, so the lanes keep their height.
-            if (!short) {
-                // Clip actions belong to the timeline: a panel over it gets the modes.
-                if (clipSelected && panel == null) ClipBar(controller, ui, tl, compact, Modifier.fillMaxWidth())
-                else ModeBar(ui, Modifier.fillMaxWidth())
+            // Clip actions belong to the timeline; a panel over it hides them.
+            if (clipSelected && (panel == null || !compact)) {
+                ClipBar(controller, ui, tl, compact, Modifier.fillMaxWidth())
             }
             TransportBar(controller, ui, tl, compact = compact, short = short)
         }
@@ -249,14 +250,16 @@ private fun Modifier.blockTouches(): Modifier = pointerInput(Unit) {
 
 /** Tracks · Mix · Beats, the three places a song is worked on. */
 @Composable
-internal fun ModeBar(ui: SongUi, modifier: Modifier = Modifier, height: Dp = 48.dp) {
-    // A hairline on top keeps the lit mode's bar off whatever sits above.
+internal fun ModeBar(ui: SongUi, modifier: Modifier = Modifier, height: Dp = 44.dp) {
+    // A hairline along the bottom keeps the lit mode's bar off the workspace.
     Row(
         modifier
             .height(height)
             .background(Colors.panel)
-            .drawBehind { drawLine(Colors.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
-            .padding(top = 2.dp),
+            .drawBehind {
+                val y = size.height - 0.5.dp.toPx()
+                drawLine(Colors.line, Offset(0f, y), Offset(size.width, y), 1.dp.toPx())
+            },
     ) {
         for (m in SongMode.entries) {
             val on = ui.mode == m
@@ -271,15 +274,15 @@ internal fun ModeBar(ui: SongUi, modifier: Modifier = Modifier, height: Dp = 48.
                     m.name,
                     style = ButtonStyle.copy(color = if (on) Colors.accent else Colors.dim, fontSize = 14.sp),
                 )
-                // The lit mode carries a bar along its top edge, where the eye
-                // comes from the workspace.
+                // The lit mode carries a bar along its bottom edge, where the
+                // workspace it shows begins.
                 if (on) {
                     Box(
                         Modifier
-                            .align(Alignment.TopCenter)
+                            .align(Alignment.BottomCenter)
                             .width(40.dp)
                             .height(3.dp)
-                            .background(Colors.accent, RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)),
+                            .background(Colors.accent, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)),
                     )
                 }
             }
@@ -290,19 +293,18 @@ internal fun ModeBar(ui: SongUi, modifier: Modifier = Modifier, height: Dp = 48.
 // ------------------------------------------------------------------ top bar --
 
 /**
- * Back, the song's name (tap to rename), what the engine hears, undo, redo,
- * share and the menu of rare things. In a short window the mode tabs, or the
- * selected clip's actions, sit in the middle of this row.
+ * Back (one step: the panel, the clip, the mode, and from Tracks the song
+ * list), the song's name (tap to rename), what the engine hears, undo, redo,
+ * share and the menu of rare things. In a short window the mode tabs sit in
+ * the middle of this row.
  */
 @Composable
 private fun SongTopBar(
     controller: SongController,
     ui: SongUi,
-    tl: TimelineState,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onRename: (String) -> Boolean,
-    compact: Boolean,
     short: Boolean,
 ) {
     val song = controller.song
@@ -344,11 +346,7 @@ private fun SongTopBar(
             if (short) {
                 HSpace(8.dp)
                 Box(Modifier.weight(1f)) {
-                    if (controller.selectedClip != null && ui.mode == SongMode.Tracks) {
-                        ClipBar(controller, ui, tl, compact, Modifier.fillMaxWidth())
-                    } else {
-                        ModeBar(ui, Modifier.fillMaxWidth().clip(RoundedCornerShape(Dimens.corner)), height = 44.dp)
-                    }
+                    ModeBar(ui, Modifier.fillMaxWidth().clip(RoundedCornerShape(Dimens.corner)), height = 44.dp)
                 }
                 HSpace(8.dp)
             }

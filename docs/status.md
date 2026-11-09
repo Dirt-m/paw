@@ -82,6 +82,10 @@ pressed them on the device. In rough order of risk:
 20. Takes panel audition, add to a chosen track, at original time; the Tempo panel's
     tap tempo; the I/O panel's output switch and Bluetooth warning; one tap New song
     arming on the Duo.
+21. The song screen's layout: mode tabs at the top, the top bar's back button stepping
+    back like the back gesture, the two row clip bar, the add row after the lanes and
+    the fades on lists that scroll. A song with beats reopened from the list must
+    play its beats at once.
 
 ## Known issues
 

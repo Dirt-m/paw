@@ -48,13 +48,14 @@ import org.paw.app.SongController
 import org.paw.app.model.MASTER_TRACK_ID
 import org.paw.app.model.Track
 
-// MIX mode: a channel strip per track, master pinned on the right. Every
-// strip, master included, gets the same width, computed so a whole number of
-// strips fills the row exactly; the strips scroll and snap a strip at a time.
-// Tall windows put a row of track chips on top to jump along a long song and
-// to add tracks. Short ones (phone landscape) spend all the height on the
-// fader: mute and solo sit beside it, and adding is a narrow column after the
-// last strip.
+// MIX mode: a channel strip per track, master pinned on the right, and a
+// narrow column after the last strip that adds tracks. Every strip, master
+// included, gets the same width. When everything fits, a whole number of
+// strips fills the row exactly; when it does not, the width leaves about a
+// third of the next strip showing at the edge, so the row reads as one that
+// goes on. The strips scroll and snap a strip at a time. Tall windows put a
+// row of track chips on top to jump along a long song. Short ones (phone
+// landscape) spend all the height on the fader: mute and solo sit beside it.
 
 private val GAP = 6.dp
 private val STRIP_PAD = 4.dp
@@ -96,7 +97,7 @@ fun MixerView(
 
     Column(Modifier.fillMaxSize().background(Colors.bg)) {
         if (!short) {
-            StripIndex(tracks, strips, controller.selectedTrack, addAudio, addBeat) { i ->
+            StripIndex(tracks, strips, controller.selectedTrack) { i ->
                 scope.launch { strips.animateScrollToItem(i) }
             }
         }
@@ -104,13 +105,12 @@ fun MixerView(
             // n track strips and the master share the width, with a gap
             // before, between and after them all.
             val minW = if (short) STRIP_MIN_SHORT else STRIP_MIN_TALL
-            val slots = ((maxWidth - GAP) / (minW + GAP)).toInt().coerceAtLeast(2)
-            val stripW = (maxWidth - GAP * (slots + 1)) / slots
+            val stripW = stripWidth(maxWidth, minW, tracks.size)
             Row(Modifier.fillMaxSize()) {
                 LazyRow(
                     state = strips,
                     flingBehavior = rememberSnapFlingBehavior(strips),
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    modifier = Modifier.weight(1f).fillMaxHeight().scrollCues(strips, vertical = false),
                     contentPadding = PaddingValues(start = GAP, top = GAP, bottom = GAP, end = GAP),
                     horizontalArrangement = Arrangement.spacedBy(GAP),
                 ) {
@@ -122,7 +122,7 @@ fun MixerView(
                             onFx = { openFx(track.id) },
                         )
                     }
-                    if (short) item(key = "add") { AddColumn(addAudio, addBeat) }
+                    item(key = "add") { AddColumn(addAudio, addBeat) }
                 }
                 Box(Modifier.padding(top = GAP, bottom = GAP, end = GAP)) {
                     MasterStrip(
@@ -137,19 +137,35 @@ fun MixerView(
     }
 }
 
+/**
+ * The width of every strip. A whole number of them and the master fill
+ * [width] when the track strips and the add column fit beside the master;
+ * otherwise the width is picked so the last strip on screen shows about a
+ * third of itself.
+ */
+private fun stripWidth(width: Dp, minW: Dp, tracks: Int): Dp {
+    val slots = ((width - GAP) / (minW + GAP)).toInt().coerceAtLeast(2)
+    val whole = (width - GAP * (slots + 1)) / slots
+    val viewport = width - whole - GAP
+    val content = GAP + (whole + GAP) * tracks + ADD_COLUMN_W + GAP
+    if (content <= viewport) return whole
+    // k whole track strips, a third of the next, then the master.
+    var k = slots - 1
+    while (k > 1 && (width - GAP * (k + 2)) / (k + 1.35f) < minW) k--
+    return (width - GAP * (k + 2)) / (k + 1.35f)
+}
+
 // ------------------------------------------------------------- strip index --
 
 /**
  * Every track as a chip; the ones whose strips are on screen are outlined.
- * A tap scrolls the strips there. The add chips close the row.
+ * A tap scrolls the strips there.
  */
 @Composable
 private fun StripIndex(
     tracks: List<Track>,
     strips: LazyListState,
     selected: Int?,
-    onAddAudio: () -> Unit,
-    onAddBeat: () -> Unit,
     onJump: (Int) -> Unit,
 ) {
     val chips = rememberLazyListState()
@@ -180,7 +196,8 @@ private fun StripIndex(
     }
     LazyRow(
         state = chips,
-        modifier = Modifier.fillMaxWidth().height(INDEX_ROW_H).background(Colors.panel),
+        modifier = Modifier.fillMaxWidth().height(INDEX_ROW_H).background(Colors.panel)
+            .scrollCues(chips, vertical = false, color = Colors.panel),
         contentPadding = PaddingValues(horizontal = GAP),
         horizontalArrangement = Arrangement.spacedBy(GAP),
         verticalAlignment = Alignment.CenterVertically,
@@ -193,8 +210,6 @@ private fun StripIndex(
                 onClick = { onJump(i) },
             )
         }
-        item(key = "add-audio") { AddChip("+ Audio", onAddAudio) }
-        item(key = "add-beat") { AddChip("+ Beat", onAddBeat) }
     }
 }
 
@@ -221,22 +236,6 @@ private fun IndexChip(name: String, outlined: Boolean, selected: Boolean, onClic
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-/** Plain outline, so it does not read as one of the strips on screen. */
-@Composable
-private fun AddChip(label: String, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .height(Dimens.touch)
-            .clip(ControlShape)
-            .border(1.dp, Colors.line, ControlShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, style = ButtonStyle.copy(color = Colors.accent), maxLines = 1, softWrap = false)
     }
 }
 

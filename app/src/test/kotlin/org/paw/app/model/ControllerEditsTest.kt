@@ -249,4 +249,49 @@ class ControllerEditsTest {
         store.dirFor(a.name).deleteRecursively()
         store.dirFor(b.name).deleteRecursively()
     }
+
+    /** Waits for the sampler's own thread to push a bank. */
+    private fun awaitBank(): Int {
+        val until = System.currentTimeMillis() + 2000
+        while (ShadowEngine.bankSize < 0 && System.currentTimeMillis() < until) {
+            idle()
+            Thread.sleep(10)
+        }
+        return ShadowEngine.bankSize
+    }
+
+    @Test
+    fun openingASongLoadsItsKit() {
+        assertEquals(1, awaitBank())
+    }
+
+    @Test
+    fun reopeningAfterStopLoadsTheKitAgain() {
+        awaitBank()
+        c.stop()
+        ShadowEngine.bankSize = -1
+        c.start()
+        assertEquals(1, awaitBank())
+    }
+
+    @Test
+    fun placingSkipsPastClipsAlreadyThere() {
+        // At 120 bpm in 4/4 a bar is 96000 frames; Groove's clip fills bar 1.
+        assertEquals(1, c.freeBarFor(4, 1))
+        c.placePattern(4, 1)
+        assertEquals(2, c.song.track(4)!!.clips.size)
+        assertEquals(96000L, c.song.track(4)!!.clips.last().start)
+        assertEquals(2, c.freeBarFor(4, 1))
+    }
+
+    @Test
+    fun stackedPatternClipsCollapseToOne() {
+        val beat = song().track(4)!!
+        val stacked = beat.copy(clips = beat.clips + (2..10).map { beat.clips[0].copy(id = it) })
+        val cleaned = song().withTrack(stacked).withoutStackedPatterns()
+        assertEquals(1, cleaned.track(4)!!.clips.size)
+        // A clip of the same pattern somewhere else stays.
+        val moved = beat.copy(clips = beat.clips + beat.clips[0].copy(id = 2, start = 96000))
+        assertEquals(2, song().withTrack(moved).withoutStackedPatterns().track(4)!!.clips.size)
+    }
 }

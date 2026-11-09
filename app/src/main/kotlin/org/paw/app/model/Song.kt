@@ -201,6 +201,24 @@ data class Song(
         else copy(tracks = tracks.map { if (it.id == updated.id) updated else it })
 
     /**
+     * This song with pattern clips that lie exactly on top of an identical
+     * one removed, keeping the first. Such a stack plays every hit once per
+     * copy and nothing on screen shows it; the lane's place button could
+     * build one by being tapped where it sat over the clip it had just made.
+     */
+    fun withoutStackedPatterns(): Song {
+        fun Track.cleaned(): Track {
+            val seen = HashSet<List<Long?>>()
+            val kept = clips.filter {
+                !it.isPattern || seen.add(listOf(it.pattern?.toLong(), it.start, it.length, it.srcStart))
+            }
+            return if (kept.size == clips.size) this else copy(clips = kept)
+        }
+        val cleaned = tracks.map { it.cleaned() }
+        return if (cleaned == tracks) this else copy(tracks = cleaned)
+    }
+
+    /**
      * This snapshot with everything undo and redo must leave alone taken from
      * [current]. These are settings and live switches, not edits: the click,
      * the count-in, the mic boost, each track's arm and monitor switches,

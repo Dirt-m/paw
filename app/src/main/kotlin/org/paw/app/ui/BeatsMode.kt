@@ -39,7 +39,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.paw.app.SongController
-import org.paw.app.model.MIN_CLIP_FRAMES
 import org.paw.app.model.Pattern
 import org.paw.app.model.TRACK_BEAT
 import org.paw.app.model.barStartFrame
@@ -154,9 +153,11 @@ internal fun BeatsMode(controller: SongController, ui: SongUi, compact: Boolean,
     Column(Modifier.fillMaxSize().background(Colors.bg)) {
         if (short) {
             // Landscape: one row of everything, then pads beside the grid.
+            val rowScroll = rememberScrollState()
             Row(
                 Modifier.fillMaxWidth().height(ROW_H).background(Colors.panel)
-                    .horizontalScroll(rememberScrollState())
+                    .scrollCues(rowScroll, vertical = false, color = Colors.panel)
+                    .horizontalScroll(rowScroll)
                     .padding(horizontal = Dimens.gap),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -282,8 +283,9 @@ private fun TrackChips(
     onAdd: () -> Unit,
     modifier: Modifier,
 ) {
+    val scroll = rememberScrollState()
     Row(
-        modifier.horizontalScroll(rememberScrollState()),
+        modifier.scrollCues(scroll, vertical = false, color = Colors.panel).horizontalScroll(scroll),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -388,7 +390,7 @@ private fun PreviewButton(playing: Boolean, onClick: () -> Unit) {
  *  the playhead on. Its own composable: the label follows the playhead. */
 @Composable
 private fun PlaceButton(controller: SongController, trackId: Int, pattern: Pattern, modifier: Modifier = Modifier) {
-    val bar = controller.freeBarFor(trackId, pattern)
+    val bar = controller.freeBarFor(trackId, pattern.id)
     AppButton(
         "Place at bar ${bar + 1}",
         onClick = {
@@ -402,29 +404,6 @@ private fun PlaceButton(controller: SongController, trackId: Int, pattern: Patte
         accent = Colors.accent,
         filled = true,
     )
-}
-
-/**
- * The 0-based bar at or after the playhead where one clip of [pattern] fits
- * on the track without overlapping a clip already there. Placing twice in a
- * row then puts the second clip after the first instead of on top of it,
- * where every hit would play twice.
- */
-private fun SongController.freeBarFor(trackId: Int, pattern: Pattern): Int {
-    val s = song
-    val clips = s.track(trackId)?.clips.orEmpty()
-    val length = s.framesOf(pattern.lengthTicks).coerceAtLeast(MIN_CLIP_FRAMES)
-    var bar = nextBarIndex()
-    while (true) {
-        val start = s.barStartFrame(bar)
-        val blocking = clips.filter { it.start < start + length && it.end > start }
-        if (blocking.isEmpty()) return bar
-        // On to the first bar that starts at or after the last overlap ends.
-        val end = blocking.maxOf { it.end }
-        var next = Math.floor(end / s.framesPerBar).toInt()
-        if (s.barStartFrame(next) < end) next++
-        bar = maxOf(next, bar + 1)
-    }
 }
 
 internal val BeatsLabelW: Dp = 64.dp

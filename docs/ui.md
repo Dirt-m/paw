@@ -28,25 +28,28 @@ with real content. Landscape leaves about 360 dp, and every layout works there t
 
 Top to bottom in portrait:
 
-- **Top bar.** Back to the song list, the song's name (tap to rename), what the engine
+- **Top bar.** Back (one step, see below), the song's name (tap to rename), what the engine
   hears (a green DUO or MIC, red LOST when the interface goes away; tap for the I/O
   panel), undo, redo, share (renders the mixdown and opens the share sheet) and a menu
   with the three rare things: Rename song, Import audio, Settings.
+- **The mode bar.** Tracks, Mix, Beats, right under the top bar.
 - **The workspace.** The current mode, or a panel over it.
-- **The mode bar.** Tracks, Mix, Beats, in thumb reach. While a clip is selected the
-  clip's actions take this slot, so nothing above it moves.
+- **The clip bar.** Only while a clip is selected: the clip's actions, over the
+  transport.
 - **The transport.** The clock, the tempo, Click and Loop, then return to start, Play
   and Rec as the biggest buttons on the screen. A thin master meter runs along its top
   edge and turns red at the right when the mix clips.
 
-In landscape the mode tabs, or the clip's actions, move into the top bar and the
-transport becomes one row, so the lanes keep their height.
+In landscape the mode tabs move into the top bar and the transport becomes one row,
+so the lanes keep their height. The clip bar stays over the transport as one row.
 
 A panel covers the whole workspace in portrait and is a 340 dp column on the right in
 landscape, with the mode still working beside it. The mode stays alive under a panel:
 its scroll position, its choices and a looping pattern are there when the panel closes.
 Back closes the panel first, then clears the clip selection, then returns to Tracks,
-and only then leaves the song.
+and only then leaves the song. The back button in the top bar takes the same steps as
+the phone's back gesture, so it never leaves the song while there is something to
+close.
 
 ## Tracks
 
@@ -67,8 +70,8 @@ level meter down the right edge. In landscape the input button and the four togg
 make one row under the name. A beat track's header has its name, how
 many sounds its kit holds, mute and solo. Tapping anywhere else on a header, or on
 empty lane space, selects the track, which is what Beats, Takes and new samples act on.
-The add row (+ Audio, + Beat, Takes) stays pinned under the lanes, under the headers
-in landscape.
+The add row (+ Audio track, + Beat track, Takes) comes after the last lane and
+scrolls with the lanes.
 
 Clips: tap to select, drag the body to move, the lower edges to trim, the top corners
 to fade. Moving an audio clip snaps the distance it moves, so the take stays in time
@@ -81,11 +84,14 @@ back too.
 Where audio clips overlap on a track, the newest is on top and the only one heard. The
 clip's bar lists the takes under it and brings any of them back to the top.
 
-The clip bar starts with ✕ to deselect. An audio clip offers Split, Duplicate and
-Delete; a pattern clip offers its pattern (swap, or a new variation for this clip
-only), how many times it repeats (− and +) and Edit, which opens Beats on it. More
-shows the rest in the same row: Sample to kit, Loop clip, move up or down a track, and
-Takes when there are takes underneath.
+The clip bar shows every action at once: two rows in portrait, one when the window
+is wide. Nothing hides behind a More button. The first row starts with ✕ to deselect.
+For an audio clip it then has Split, Duplicate and Delete, and the second row has
+Sample to kit, Loop clip, ▲ and ▼ to move the clip a track up or down, and Takes when
+there are takes underneath. For a pattern clip the first row has its pattern (swap, or
+a new variation for this clip only), how many times it repeats (− and +) and Edit,
+which opens Beats on it; the second row has Split, Duplicate, Delete, Loop clip, ▲
+and ▼.
 
 The clock reads bars and beats (3.2 with the hundredths small beside it); tap it to
 read minutes and seconds, and the ruler follows. During a count-in it shows the beats
@@ -93,10 +99,12 @@ left. The tempo button shows the tempo over the meter and opens the Tempo panel.
 
 ## Mix
 
-One strip per track, the master pinned on the right, widths computed so a whole number
-of strips fills the space (three and the master in portrait). In portrait a row of
-track chips above the strips shows every track, outlines the ones on screen and scrolls
-there on a tap; + Audio and + Beat end it. A strip has the name (opens the inspector),
+One strip per track, the master pinned on the right, and a column with + Audio and
++ Beat after the last strip. When everything fits, a whole number of strips fills
+the space (three and the master in portrait). When it does not, the strips widen so
+about a third of the next one shows at the edge (two and a third in portrait), so the
+row plainly goes on. In portrait a row of track chips above the strips shows every
+track, outlines the ones on screen and scrolls there on a tap. A strip has the name (opens the inspector),
 an FX button with the effect count (opens the inspector on its effects), a long fader
 beside a meter, the dB value, pan, and mute and solo. Arm and monitor are not here:
 they live on the lanes and in the inspector. In landscape mute and solo stack beside the
@@ -173,6 +181,9 @@ read only Audio block, the songs folder and the effects folder.
 - Words are set in the system sans; numbers that change under the eye (the clock, dB,
   times) are monospace so they do not jitter.
 - Panels, pickers and confirmations are drawn in the layout, never as popups.
+- A list that runs past its edge fades into the background on that edge. Lists of
+  big items (lanes, mixer strips) also size them so the last one on screen is cut part
+  way, never exactly at the edge, where it would look like the end.
 - No explainer text. A control's label is its whole explanation; an empty state may say
   in one line how to fill it.
 

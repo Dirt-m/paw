@@ -63,7 +63,8 @@ import org.paw.app.model.TRACK_BEAT
 import org.paw.app.model.Track
 import org.paw.app.model.barStartFrame
 
-// The Tracks mode: the ruler block, the lanes with their headers, the add row.
+// The Tracks mode: the ruler block, the lanes with their headers, and the
+// add row after the last lane.
 
 /** Portrait headers hold their toggles 2 by 2; a wide window has room for
  *  the input and all four toggles in one row. */
@@ -118,17 +119,8 @@ internal fun TracksView(
     Column(Modifier.fillMaxSize()) {
         RulerBlock(controller, ui, tl, headerW, wide = !compact)
 
-        // Portrait gives the add row its own strip under the lanes. A wide
-        // window is short, so the row sits over the bottom of the header
-        // column only and the lanes keep the full height beside it.
-        val addOver = !compact
         BoxWithConstraints(Modifier.weight(1f)) {
-            // A handful of tracks grows to fill the viewport; past the cap
-            // the list scrolls at the standard height instead.
-            val room = if (addOver) maxHeight - addRowH else maxHeight
-            val laneH =
-                if (song.tracks.isEmpty()) laneMin
-                else (room / song.tracks.size).coerceIn(laneMin, laneMax)
+            val laneH = laneHeight(song.tracks.size, maxHeight, addRowH, laneMin, laneMax)
             val laneHPx = with(LocalDensity.current) { laneH.toPx() }
             val laneScroll = rememberScrollState()
             var viewportPx by remember { mutableIntStateOf(0) }
@@ -159,6 +151,7 @@ internal fun TracksView(
                     .fillMaxSize()
                     .onSizeChanged { viewportPx = it.height }
                     .emptyAreaGestures(tl, controller, headerPx) { lanesBottom - laneScroll.value }
+                    .scrollCues(laneScroll, vertical = true)
                     .verticalScroll(laneScroll),
             ) {
                 song.tracks.forEachIndexed { index, track ->
@@ -186,34 +179,41 @@ internal fun TracksView(
                         }
                     }
                 }
-                // Lets the last lane scroll clear of the add row over it.
-                if (addOver) Spacer(Modifier.height(addRowH))
-            }
-            if (addOver) {
-                AddRow(controller, ui, Modifier.align(Alignment.BottomStart).width(headerW).height(addRowH))
+                AddRow(controller, ui, Modifier.fillMaxWidth().height(addRowH))
             }
         }
-        if (!addOver) AddRow(controller, ui, Modifier.fillMaxWidth().height(addRowH))
     }
 }
 
 /**
- * New tracks are made where the tracks live, and the song's recordings are
- * one tap from the same row. It is pinned below the lanes, not in their
- * scroll, so a long song never hides it.
+ * How tall each lane is. A handful of tracks grows to fill the viewport with
+ * the add row under them. Past that the list scrolls, and the height is
+ * picked so the last lane on screen is cut about a third of the way down:
+ * a lane that ends exactly at the bottom edge looks like the end of the song.
+ */
+private fun laneHeight(count: Int, viewport: Dp, addRowH: Dp, laneMin: Dp, laneMax: Dp): Dp {
+    if (count == 0) return laneMin
+    if (laneMin * count + addRowH <= viewport) return ((viewport - addRowH) / count).coerceIn(laneMin, laneMax)
+    val whole = maxOf(1, (viewport / laneMin - 0.35f).toInt())
+    return (viewport / (whole + 0.35f)).coerceIn(laneMin, laneMax)
+}
+
+/**
+ * New tracks are made where the tracks end, and the song's recordings are
+ * one tap from the same row. It scrolls with the lanes, so it sits right
+ * under the last track and takes no room from a long song.
  */
 @Composable
 private fun AddRow(controller: SongController, ui: SongUi, modifier: Modifier) {
+    // Opaque, so the grid and the playhead stop at it instead of running
+    // through the buttons.
     Row(
-        modifier
-            .background(Colors.panel)
-            .drawBehind { drawLine(Colors.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
-            .padding(horizontal = 6.dp),
+        modifier.background(Colors.bg).padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        AppButton("+ Audio", accent = Colors.accent, padding = 10.dp, onClick = { controller.addTrack() })
-        AppButton("+ Beat", accent = Colors.accent, padding = 10.dp, onClick = {
+        AppButton("+ Audio track", accent = Colors.accent, padding = 10.dp, onClick = { controller.addTrack() })
+        AppButton("+ Beat track", accent = Colors.accent, padding = 10.dp, onClick = {
             selectTrack(controller, ui, controller.addBeatTrack())
         })
         AppButton("Takes", padding = 10.dp, onClick = { ui.open(SongPanel.Takes) })
@@ -517,7 +517,7 @@ internal fun inputBadge(track: Track): String {
 
 /**
  * On the selected beat lane: one tap puts the pattern Beats last showed (or
- * the track's first) at the bar after the playhead. Reads the playhead, so it
+ * the track's first) at the first free bar from the playhead on. Reads the playhead, so it
  * lives apart from the lane and only it follows the clock. While a finger is
  * on it the bar holds still, so the target cannot move under the tap.
  */
@@ -527,7 +527,9 @@ private fun BoxScope.PatternGhost(controller: SongController, ui: SongUi, tl: Ti
     val pattern = patterns.find { it.id == ui.beatsPattern } ?: patterns.firstOrNull() ?: return
     val press = remember { MutableInteractionSource() }
     val pressed by press.collectIsPressedAsState()
-    val live = controller.nextBarIndex()
+    // The first bar the pattern fits without covering a clip, so the ghost
+    // steps past each clip it places instead of stacking another on it.
+    val live = controller.freeBarFor(track.id, pattern.id)
     val held = remember(pressed) { live }
     val bar = if (pressed) held else live
     val x = tl.pxOf(controller.song.barStartFrame(bar))

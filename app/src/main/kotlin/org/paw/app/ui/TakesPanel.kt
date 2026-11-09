@@ -166,6 +166,7 @@ internal fun TakesPanel(controller: SongController, ui: SongUi, modifier: Modifi
 
         val list = takes
         val groups = remember(list, song.tracks) { list?.let { grouped(controller, it) } }
+        val takesList = rememberLazyListState()
         when {
             groups == null -> {}
             groups.isEmpty() -> Column(
@@ -176,8 +177,8 @@ internal fun TakesPanel(controller: SongController, ui: SongUi, modifier: Modifi
                 Text("No recordings in this song yet", style = BodyStyle.copy(color = Colors.dim))
             }
             else -> LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
-                state = rememberLazyListState(),
+                Modifier.weight(1f).fillMaxWidth().scrollCues(takesList, vertical = true, color = Colors.bg),
+                state = takesList,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp),
             ) {
                 groups.forEach { group ->
